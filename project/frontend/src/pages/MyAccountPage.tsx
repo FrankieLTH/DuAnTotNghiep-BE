@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Button } from '../components/ui/Button';
 import { Badge } from '../components/ui/Badge';
+import { useRealtimeSync } from '../hooks/useRealtimeSync';
 
 interface MyAccountPageProps {
   onGoHome: () => void;
@@ -10,6 +11,15 @@ interface MyAccountPageProps {
 export const MyAccountPage: React.FC<MyAccountPageProps> = ({ onGoHome, onBookRoom }) => {
   const [activeTab, setActiveTab] = useState<'trips' | 'smartpin' | 'vouchers' | 'profile' | 'support'>('trips');
   const [copiedPin, setCopiedPin] = useState(false);
+  const [, setSyncKey] = useState<number>(0);
+
+  // Lắng nghe sự kiện realtime từ Admin: cập nhật đơn phòng & mã PIN tức thì
+  useRealtimeSync({
+    eventTypes: ['booking.updated', 'customer.updated'],
+    onRefresh: () => {
+      setSyncKey((prev) => prev + 1);
+    },
+  });
 
   const handleCopyPin = () => {
     navigator.clipboard.writeText('829415');

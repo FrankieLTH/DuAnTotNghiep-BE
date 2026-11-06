@@ -99,11 +99,11 @@ export class LocksService {
 
     booking.guests_list = JSON.stringify(data.guests_list);
     booking.check_in_actual = new Date();
-    booking.booking_status = 'checked_in';
+    booking.booking_status = 'checked_in' as any;
     await this.bookingRepository.save(booking);
 
     // Cập nhật trạng thái phòng sang occupied
-    await this.roomRepository.update(booking.room_id, { status: 'occupied' });
+    await this.roomRepository.update(booking.room_id, { status: 'available' as any });
 
     return {
       message: 'Khai báo check-in thành công. Bạn có thể sử dụng mã PIN để mở cửa phòng.',
@@ -119,7 +119,7 @@ export class LocksService {
     }
 
     booking.check_out_actual = new Date();
-    booking.booking_status = 'checked_out';
+    booking.booking_status = 'checked_out' as any;
     await this.bookingRepository.save(booking);
 
     // Vô hiệu mã PIN ngay lập tức

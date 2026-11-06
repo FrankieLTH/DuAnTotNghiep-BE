@@ -4,28 +4,23 @@
 
 @layer base {
   body {
-    @apply bg-secondary-cream text-brand-earth antialiased font-sans selection:bg-brand-terracotta selection:text-white;
+    background-color: #FAF6F0;
+    color: #241C18;
+    @apply antialiased font-sans selection:bg-[#C4572E] selection:text-white;
   }
 }
 
 @layer utilities {
-  /* Typography Classes based on Figma Spec */
   .text-display-hero {
-    @apply font-serif font-bold text-4xl md:text-[48px] leading-[1.15] text-brand-earth;
+    @apply font-serif font-bold text-3xl md:text-5xl leading-tight text-[#241C18];
   }
   .text-heading-1 {
-    @apply font-serif font-bold text-3xl md:text-[36px] leading-[1.25] text-brand-earth;
+    @apply font-serif font-bold text-2xl md:text-3xl leading-snug text-[#241C18];
   }
   .text-heading-2 {
-    @apply font-serif font-semibold text-2xl md:text-[28px] leading-[1.3] text-brand-earth;
+    @apply font-serif font-semibold text-xl md:text-2xl leading-snug text-[#241C18];
   }
   .text-heading-3 {
-    @apply font-serif font-semibold text-xl md:text-[22px] leading-[1.35] text-brand-earth;
-  }
-  .text-heading-4 {
-    @apply font-sans font-semibold text-lg md:text-[18px] leading-[1.4] text-brand-earth;
-  }
-  .text-heading-5 {
-    @apply font-sans font-bold text-base md:text-[16px] leading-[1.4] text-brand-earth;
+    @apply font-serif font-semibold text-lg md:text-xl leading-normal text-[#241C18];
   }
 }

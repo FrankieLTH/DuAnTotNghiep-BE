@@ -88,14 +88,15 @@ export class BookingsService {
 
     const booking = this.bookingRepository.create({
       booking_code: bookingCode,
+      apartment_id: room.apartment_id,
       user_id: data.user_id,
       room_id: data.room_id,
       voucher_id: voucherId,
       guests_list: data.guests_list ? JSON.stringify(data.guests_list) : null,
-      booking_type: data.booking_type || 'short_stay',
+      booking_type: (data.booking_type as any) || 'overnight',
       booked_start_time: start.toDate(),
       booked_end_time: end.toDate(),
-      booking_status: 'pending',
+      booking_status: 'pending_payment' as any,
       total_price: totalPrice,
       discount_amount: discountAmount,
     });
@@ -207,7 +208,7 @@ export class BookingsService {
 
     await this.refundRepository.save(refund);
 
-    booking.booking_status = 'cancelled';
+    booking.booking_status = 'cancelled' as any;
     await this.bookingRepository.save(booking);
 
     return {

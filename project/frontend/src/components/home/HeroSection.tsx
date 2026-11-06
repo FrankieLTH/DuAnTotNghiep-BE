@@ -1,48 +1,41 @@
 import React from 'react';
 import { SearchBookingBar } from './SearchBookingBar';
+import { SearchParams } from '../../services/dataService';
 
 interface HeroSectionProps {
-  onSearch?: (params: any) => void;
+  onSearch?: (params: SearchParams) => void;
 }
 
 export const HeroSection: React.FC<HeroSectionProps> = ({ onSearch }) => {
   return (
-    <section className="relative w-full min-h-[92vh] sm:min-h-screen flex flex-col justify-between pt-32 pb-8 md:pb-12 overflow-hidden">
-      {/* Background Image với hiệu ứng phản chiếu hồ bơi hoàng hôn đúng như thiết kế */}
-      <div className="absolute inset-0 z-0">
+    <section className="relative w-full min-h-[90vh] flex flex-col justify-between pt-28 pb-12">
+      {/* Background Image với lớp phủ kiến trúc ấm áp */}
+      <div className="absolute inset-0 z-0 overflow-hidden">
         <img
           src="https://images.unsplash.com/photo-1582719478250-c89cae4dc85b?auto=format&fit=crop&w=2000&q=85"
-          alt="Đồi Bông Gòn Homestay Hồ Bơi"
-          className="w-full h-full object-cover object-center transform scale-100 filter brightness-90"
+          alt="Không gian Đồi Bông Gòn Homestay"
+          className="w-full h-full object-cover object-center filter brightness-[0.82]"
         />
-        {/* Lớp phủ chuyển màu gradient tối phía trên và phía dưới để làm nổi bật chữ */}
-        <div className="absolute inset-0 bg-gradient-to-b from-black/60 via-black/30 to-black/75 pointer-events-none" />
+        <div className="absolute inset-0 bg-gradient-to-b from-black/60 via-black/25 to-[#1A1615]/85 pointer-events-none" />
       </div>
 
-      {/* Phần nội dung Tiêu đề chính giữa */}
-      <div className="relative z-10 w-full max-w-5xl mx-auto px-4 text-center my-auto pt-8 md:pt-16">
-        {/* Biểu tượng / Crest nhỏ tinh tế */}
-        <div className="flex justify-center mb-4">
-          <div className="h-0.5 w-12 bg-white/40 my-auto"></div>
-          <span className="mx-3 text-amber-200/90 text-xs tracking-[0.3em] uppercase font-sans font-medium">
-            Sanctuary & Art Resort
-          </span>
-          <div className="h-0.5 w-12 bg-white/40 my-auto"></div>
+      {/* Nội dung tiêu đề chính */}
+      <div className="relative z-10 w-full max-w-4xl mx-auto px-4 text-center my-auto pt-6 pb-8">
+        <div className="inline-flex items-center gap-2 mb-4 px-3.5 py-1 rounded-full bg-white/10 backdrop-blur-xs border border-white/15 text-white/90 text-xs font-sans tracking-widest uppercase">
+          <span>Khu Nghỉ Dưỡng Mộc & Tự Động Hóa 24/7</span>
         </div>
 
-        {/* Tiêu đề ĐỒI BÔNG GÒN cỡ lớn serif chuẩn mẫu */}
-        <h1 className="font-serif font-bold text-4xl sm:text-6xl md:text-7xl lg:text-8xl text-white tracking-[0.18em] uppercase leading-tight drop-shadow-2xl">
-          ĐỒI BÔNG GÒN
+        <h1 className="font-serif font-bold text-4xl sm:text-6xl md:text-7xl text-white tracking-wide leading-tight drop-shadow-md">
+          Đồi Bông Gòn
         </h1>
 
-        {/* Phụ đề nghệ thuật nghỉ dưỡng */}
-        <p className="mt-4 sm:mt-6 font-sans text-xs sm:text-sm md:text-base text-white/90 tracking-[0.25em] sm:tracking-[0.35em] uppercase font-light max-w-3xl mx-auto drop-shadow-lg">
-          KHÔNG GIAN NGHỆ THUẬT NGHỈ DƯỠNG ĐẬM CHẤT BẢN ĐỊA
+        <p className="mt-4 font-sans text-sm sm:text-base text-white/90 font-light max-w-xl mx-auto leading-relaxed">
+          Không gian lưu trú thư thái giữa lòng phố thị. Tự do nhận phòng tự động với hệ thống khoá thông minh TTLock.
         </p>
       </div>
 
-      {/* Thanh Search Booking Bar nổi ở phía dưới chân Hero */}
-      <div className="relative z-20 w-full mt-8 md:mt-12">
+      {/* Thanh Tìm kiếm & Đặt phòng */}
+      <div className="relative z-30 w-full">
         <SearchBookingBar onSearch={onSearch} />
       </div>
     </section>

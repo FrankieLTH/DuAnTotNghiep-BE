@@ -7,35 +7,38 @@ export default {
   theme: {
     extend: {
       fontFamily: {
-        serif: ['"Playfair Display"', 'serif'],
-        sans: ['"Plus Jakarta Sans"', 'sans-serif'],
+        sans: ['"Be Vietnam Pro"', 'Inter', '-apple-system', 'BlinkMacSystemFont', 'Segoe UI', 'Roboto', 'sans-serif'],
+        serif: ['"Playfair Display"', 'Georgia', 'serif'],
       },
       colors: {
         brand: {
-          earth: '#3E2C23',     // Primary 900 (Deep Earth)
-          terracotta: '#C85A32',// Primary 700 (Brand Main Color)
-          amber: '#E07A5F',     // Primary 500 (Warm Amber Accent)
-          tint: '#FDF0ED',      // Primary 100 (Warm Tint)
+          earth: '#241C18',     // Warm Ink Black
+          terracotta: '#C4572E',// Terracotta Burnt Orange (như ảnh mẫu)
+          amber: '#D26B38',     // Warm Ember
+          tint: '#F5ECE4',      // Soft Clay Tint
         },
         secondary: {
-          olive: '#5B7052',     // Olive Pine (Rêu núi)
-          herbal: '#7B9074',    // Herbal Mist (Rêu sương)
-          sand: '#E8DFD1',      // Warm Sand (Cát nắng)
-          cream: '#FDF9F3',     // Cream Clean (Nền kem mộc)
+          olive: '#384E42',     // Deep Pine
+          herbal: '#5A7566',    // Sage Mist
+          sand: '#E8E2D8',      // Warm Stone border
+          cream: '#FAF6F0',     // Oat Linen Ground (chuẩn màu nền ảnh mẫu)
         },
         semantic: {
-          success: '#3D7B62',
-          successBg: '#EAF4F0',
-          warning: '#D9822B',
-          warningBg: '#FEF8EC',
-          error: '#D14949',
-          errorBg: '#FDF0F0',
+          success: '#2A694E',
+          successBg: '#EDF5F1',
+          warning: '#B86A1B',
+          warningBg: '#FDF7EE',
+          error: '#A83232',
+          errorBg: '#FDF2F2',
         }
       },
       borderRadius: {
-        'xl': '1rem',
-        '2xl': '1.25rem',
-        '3xl': '1.75rem',
+        'sm': '0.25rem',
+        'md': '0.375rem',
+        'lg': '0.5rem',
+        'xl': '0.75rem',
+        '2xl': '1rem',
+        '3xl': '1.25rem',
       }
     },
   },

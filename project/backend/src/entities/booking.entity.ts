@@ -1,16 +1,39 @@
-import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateColumn, ManyToOne, JoinColumn } from 'typeorm';
-import { User } from './user.entity';
-import { Room } from './room.entity';
+import {
+  Entity,
+  PrimaryGeneratedColumn,
+  Column,
+  CreateDateColumn,
+  UpdateDateColumn,
+  ManyToOne,
+  OneToMany,
+  JoinColumn,
+  DeleteDateColumn,
+  Index,
+} from 'typeorm';
+import { User, Staff, Customer } from './user.entity';
+import { Room, Apartment, RoomType } from './room.entity';
+import {
+  BookingStatus,
+  BookingType,
+  VerificationStatus,
+  BookingSource,
+  GuestType,
+  DocType,
+  GuestSlotStatus,
+  TransactionType,
+  LockStatus,
+  LockType,
+} from '@shared/enums';
 
-@Entity('locks')
+@Entity('lock')
 export class Lock {
   @PrimaryGeneratedColumn()
   id: number;
 
-  @Column()
+  @Column({ nullable: true })
   room_id: number;
 
-  @ManyToOne(() => Room)
+  @ManyToOne(() => Room, { nullable: true })
   @JoinColumn({ name: 'room_id' })
   room: Room;
 
@@ -20,17 +43,23 @@ export class Lock {
   @Column({ nullable: true })
   lock_name: string;
 
-  @Column({ type: 'enum', enum: ['ttlock', 'manual', 'other'], default: 'ttlock' })
-  lock_type: string;
+  @Column({ type: 'enum', enum: LockType, default: LockType.TTLOCK })
+  lock_type: LockType;
 
-  @Column({ type: 'enum', enum: ['online', 'offline', 'unknown'], default: 'unknown' })
-  lock_status: string;
+  @Column({ type: 'enum', enum: LockStatus, default: LockStatus.UNKNOWN })
+  lock_status: LockStatus;
+
+  @Column({ default: 100 })
+  battery_level: number;
 
   @Column({ nullable: true })
   master_pin: string;
 
   @Column({ type: 'datetime', nullable: true })
   last_sync_at: Date;
+
+  @DeleteDateColumn({ nullable: true })
+  deleted_at: Date;
 
   @CreateDateColumn()
   created_at: Date;
@@ -75,7 +104,9 @@ export class Voucher {
   is_active: boolean;
 }
 
-@Entity('bookings')
+@Entity('BOOKINGS')
+@Index('idx_bookings_apt_status_start', ['apartment_id', 'booking_status', 'booked_start_time'])
+@Index('idx_bookings_customer_hold', ['customer_id', 'hold_expires_at'])
 export class Booking {
   @PrimaryGeneratedColumn()
   id: number;
@@ -83,32 +114,59 @@ export class Booking {
   @Column({ unique: true })
   booking_code: string;
 
+  @Column()
+  apartment_id: number;
+
+  @ManyToOne(() => Apartment)
+  @JoinColumn({ name: 'apartment_id' })
+  apartment: Apartment;
+
+  @Column({ nullable: true })
+  customer_id: number;
+
+  @ManyToOne(() => Customer, { nullable: true })
+  @JoinColumn({ name: 'customer_id' })
+  customer: Customer;
+
+  // Backwards compatibility for user_id
   @Column({ nullable: true })
   user_id: number;
 
-  @ManyToOne(() => User)
+  @ManyToOne(() => User, { nullable: true })
   @JoinColumn({ name: 'user_id' })
   user: User;
 
-  @Column()
+  @Column({ nullable: true })
   room_id: number;
 
-  @ManyToOne(() => Room)
+  @ManyToOne(() => Room, { nullable: true })
   @JoinColumn({ name: 'room_id' })
   room: Room;
 
   @Column({ nullable: true })
   voucher_id: number;
 
-  @ManyToOne(() => Voucher)
+  @ManyToOne(() => Voucher, { nullable: true })
   @JoinColumn({ name: 'voucher_id' })
   voucher: Voucher;
+
+  @Column({ default: 1 })
+  adults: number;
+
+  @Column({ default: 0 })
+  children: number;
 
   @Column({ type: 'longtext', nullable: true })
   guests_list: string;
 
-  @Column({ type: 'enum', enum: ['short_stay', 'long_stay', 'monthly'], default: 'short_stay' })
-  booking_type: string;
+  @Column({ default: false })
+  is_booked_for_other: boolean;
+
+  @Column({ nullable: true })
+  lock_email: string;
+
+  @Column({ type: 'enum', enum: BookingType, default: BookingType.OVERNIGHT })
+  booking_type: BookingType;
 
   @Column({ type: 'datetime' })
   booked_start_time: Date;
@@ -124,16 +182,68 @@ export class Booking {
 
   @Column({
     type: 'enum',
-    enum: ['pending', 'confirmed', 'checked_in', 'checked_out', 'cancelled', 'no_show'],
-    default: 'pending',
+    enum: BookingStatus,
+    default: BookingStatus.PENDING_PAYMENT,
   })
-  booking_status: string;
+  booking_status: BookingStatus;
+
+  @Column({
+    type: 'enum',
+    enum: VerificationStatus,
+    default: VerificationStatus.PENDING,
+  })
+  verification_status: VerificationStatus;
+
+  @Column({ nullable: true })
+  reviewed_by: number;
+
+  @ManyToOne(() => Staff, { nullable: true })
+  @JoinColumn({ name: 'reviewed_by' })
+  reviewer: Staff;
+
+  @Column({ type: 'datetime', nullable: true })
+  reviewed_at: Date;
+
+  @Column({ type: 'datetime', nullable: true })
+  consent_at: Date;
+
+  @Column({ nullable: true })
+  stay_reason: string;
+
+  @Column({ type: 'enum', enum: BookingSource, default: BookingSource.ONLINE })
+  source: BookingSource;
+
+  @Column({ nullable: true })
+  created_by: number;
+
+  @ManyToOne(() => Staff, { nullable: true })
+  @JoinColumn({ name: 'created_by' })
+  creator: Staff;
+
+  @Column({ type: 'text', nullable: true })
+  note: string;
+
+  @Column({ type: 'text', nullable: true })
+  cancel_reason: string;
+
+  @Column({ type: 'datetime', nullable: true })
+  cancelled_at: Date;
+
+  @Column({ nullable: true })
+  cancelled_by: number;
+
+  @ManyToOne(() => Staff, { nullable: true })
+  @JoinColumn({ name: 'cancelled_by' })
+  canceller: Staff;
 
   @Column('decimal', { precision: 12, scale: 2 })
   total_price: number;
 
   @Column('decimal', { precision: 12, scale: 2, default: 0 })
   discount_amount: number;
+
+  @Column({ type: 'datetime', nullable: true })
+  hold_expires_at: Date;
 
   @Column({ default: false })
   is_archived: boolean;
@@ -143,6 +253,112 @@ export class Booking {
 
   @UpdateDateColumn()
   updated_at: Date;
+
+  @OneToMany(() => BookingGuest, (guest) => guest.booking)
+  guests: BookingGuest[];
+
+  @OneToMany(() => BookingRoom, (br) => br.booking)
+  booking_rooms: BookingRoom[];
+
+  @OneToMany(() => Transaction, (tx) => tx.booking)
+  transactions: Transaction[];
+
+  @OneToMany(() => LockPin, (lp) => lp.booking)
+  lock_pins: LockPin[];
+}
+
+@Entity('booking_guests')
+export class BookingGuest {
+  @PrimaryGeneratedColumn()
+  id: number;
+
+  @Column()
+  bookings_id: number;
+
+  @ManyToOne(() => Booking, (b) => b.guests, { onDelete: 'CASCADE' })
+  @JoinColumn({ name: 'bookings_id' })
+  booking: Booking;
+
+  @Column({ type: 'enum', enum: GuestType, default: GuestType.PRIMARY })
+  guest_type: GuestType;
+
+  @Column({ default: true })
+  is_staying: boolean;
+
+  @Column()
+  full_name: string;
+
+  @Column({ type: 'date', nullable: true })
+  date_of_birth: Date;
+
+  @Column({ type: 'enum', enum: ['male', 'female', 'other'], nullable: true })
+  gender: string;
+
+  @Column({ nullable: true })
+  phone: string;
+
+  @Column({ nullable: true })
+  email: string;
+
+  @Column({ type: 'enum', enum: DocType, nullable: true })
+  doc_type: DocType;
+
+  @Column({ nullable: true })
+  doc_number: string;
+
+  @Column({ nullable: true })
+  doc_image_front: string;
+
+  @Column({ nullable: true })
+  doc_image_back: string;
+
+  @Column('decimal', { precision: 5, scale: 2, nullable: true })
+  ocr_confidence: number;
+
+  @Column({ type: 'longtext', nullable: true })
+  ocr_raw: string;
+
+  @Column({ type: 'enum', enum: GuestSlotStatus, default: GuestSlotStatus.EMPTY })
+  status: GuestSlotStatus;
+
+  @Column({ type: 'datetime', nullable: true })
+  doc_deleted_at: Date;
+
+  @CreateDateColumn()
+  created_at: Date;
+
+  @UpdateDateColumn()
+  updated_at: Date;
+}
+
+@Entity('Booking_rooms')
+export class BookingRoom {
+  @PrimaryGeneratedColumn()
+  id: number;
+
+  @Column()
+  bookings_id: number;
+
+  @ManyToOne(() => Booking, (b) => b.booking_rooms, { onDelete: 'CASCADE' })
+  @JoinColumn({ name: 'bookings_id' })
+  booking: Booking;
+
+  @Column()
+  room_types_id: number;
+
+  @ManyToOne(() => RoomType)
+  @JoinColumn({ name: 'room_types_id' })
+  room_type: RoomType;
+
+  @Column({ nullable: true })
+  room_id: number;
+
+  @ManyToOne(() => Room, { nullable: true })
+  @JoinColumn({ name: 'room_id' })
+  room: Room;
+
+  @CreateDateColumn()
+  created_at: Date;
 }
 
 @Entity('lock_pin')
@@ -178,6 +394,75 @@ export class LockPin {
 
   @Column({ default: 'active' })
   status: string;
+
+  @CreateDateColumn()
+  created_at: Date;
+}
+
+@Entity('TRANSACTION')
+export class Transaction {
+  @PrimaryGeneratedColumn()
+  id: number;
+
+  @Column()
+  booking_id: number;
+
+  @ManyToOne(() => Booking, (b) => b.transactions, { onDelete: 'CASCADE' })
+  @JoinColumn({ name: 'booking_id' })
+  booking: Booking;
+
+  @Column({ type: 'enum', enum: TransactionType })
+  type: TransactionType;
+
+  @Column('decimal', { precision: 12, scale: 2 })
+  amount: number;
+
+  @Column({ default: 'counter_cash' })
+  payment_method: string;
+
+  @Column({ nullable: true })
+  transaction_code: string;
+
+  @Column({ type: 'text', nullable: true })
+  note: string;
+
+  @Column({ nullable: true })
+  created_by: number;
+
+  @ManyToOne(() => Staff, { nullable: true })
+  @JoinColumn({ name: 'created_by' })
+  creator: Staff;
+
+  @CreateDateColumn()
+  created_at: Date;
+}
+
+@Entity('Audit_logs')
+@Index('idx_audit_logs_entity', ['entity_type', 'entity_id'])
+export class AuditLog {
+  @PrimaryGeneratedColumn()
+  id: number;
+
+  @Column()
+  actor: string;
+
+  @Column({ nullable: true })
+  actor_id: number;
+
+  @Column()
+  action: string;
+
+  @Column()
+  entity_type: string;
+
+  @Column()
+  entity_id: number;
+
+  @Column({ type: 'longtext', nullable: true })
+  old_value: string;
+
+  @Column({ type: 'longtext', nullable: true })
+  new_value: string;
 
   @CreateDateColumn()
   created_at: Date;
@@ -270,7 +555,7 @@ export class AIChatLog {
   id: number;
 
   @Column({ nullable: true })
-  user_id: number;
+  customer_id: number;
 
   @Column()
   session_id: string;

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Navbar } from './components/home/Navbar';
 import { HeroSection } from './components/home/HeroSection';
 import { ArtIntroSection } from './components/home/ArtIntroSection';
@@ -10,34 +10,74 @@ import { QuoteStatsSection } from './components/home/QuoteStatsSection';
 import { RoomSelectionSection } from './components/home/RoomSelectionSection';
 import { TestimonialsSection } from './components/home/TestimonialsSection';
 import { Footer } from './components/home/Footer';
-import { AIChatWidget } from './components/home/AIChatWidget';
+import { ContactFloatingWidget } from './components/home/ContactFloatingWidget';
 
 // Client pages
 import { RoomListPage } from './pages/RoomListPage';
+import { SearchResultPage } from './pages/SearchResultPage';
 import { RoomDetailPage } from './pages/RoomDetailPage';
 import { CheckoutPage } from './pages/CheckoutPage';
 import { MyAccountPage } from './pages/MyAccountPage';
 import { SupportPage } from './pages/SupportPage';
 import { LocationsPage } from './pages/LocationsPage';
 import { VouchersPage } from './pages/VouchersPage';
+import { AdminPage } from './pages/AdminPage';
+
+import { SearchParams, BookingDraft } from './services/dataService';
 
 export type ViewState =
   | 'home'
   | 'room-list'
+  | 'search-results'
   | 'room-detail'
   | 'checkout'
   | 'my-account'
   | 'support'
   | 'locations'
-  | 'vouchers';
+  | 'vouchers'
+  | 'admin';
 
 function App() {
-  const [currentView, setCurrentView] = useState<ViewState>('home');
+  // Khởi tạo view từ URL: Nếu URL là /admin thì vào thẳng trang admin
+  const getInitialView = (): ViewState => {
+    if (typeof window !== 'undefined') {
+      const pathname = window.location.pathname.toLowerCase();
+      if (pathname === '/admin' || pathname.startsWith('/admin')) {
+        return 'admin';
+      }
+    }
+    return 'home';
+  };
+
+  const [currentView, setCurrentView] = useState<ViewState>(getInitialView);
   const [selectedRoomId, setSelectedRoomId] = useState<number>(1);
-  const [bookingData, setBookingData] = useState<any>(null);
+  const [searchParams, setSearchParams] = useState<SearchParams | undefined>(undefined);
+  const [bookingData, setBookingData] = useState<BookingDraft | any>(null);
+
+  // Lắng nghe thay đổi popstate trên trình duyệt (Back/Forward)
+  useEffect(() => {
+    const handlePopState = () => {
+      const pathname = window.location.pathname.toLowerCase();
+      if (pathname === '/admin' || pathname.startsWith('/admin')) {
+        setCurrentView('admin');
+      } else {
+        setCurrentView('home');
+      }
+    };
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, []);
 
   const handleNavigate = (view: string) => {
-    setCurrentView(view as ViewState);
+    const nextView = view as ViewState;
+    setCurrentView(nextView);
+
+    if (typeof window !== 'undefined') {
+      const targetUrl = nextView === 'admin' ? '/admin' : '/';
+      if (window.location.pathname !== targetUrl) {
+        window.history.pushState(null, '', targetUrl);
+      }
+    }
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
@@ -47,22 +87,33 @@ function App() {
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
-  const handleSearch = (searchParams: any) => {
-    console.log('Search params:', searchParams);
-    setCurrentView('room-list');
+  const handleSearch = (params: SearchParams) => {
+    setSearchParams(params);
+    setCurrentView('search-results');
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
-  const handleProceedToCheckout = (data: any) => {
+  const handleSelectRoomType = (draft: BookingDraft) => {
+    setBookingData(draft);
+    setCurrentView('checkout');
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  const handleProceedToCheckoutFromDetail = (data: any) => {
     setBookingData(data);
     setCurrentView('checkout');
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
+  // NẾU LÀ CỔNG ADMIN (/admin): Hiển thị giao diện Admin Simulator riêng biệt
+  if (currentView === 'admin') {
+    return <AdminPage onGoHome={() => handleNavigate('home')} />;
+  }
+
   return (
-    <div className="min-h-screen bg-[#FAF7F2] text-[#3E2C23] font-sans antialiased flex flex-col justify-between">
+    <div className="min-h-screen bg-[#FAF6F0] text-[#241C18] font-sans antialiased flex flex-col justify-between">
       <div>
-        {/* Navbar (Fixed/Transparent across views) */}
+        {/* Navbar */}
         <Navbar
           onOpenBookingModal={() => handleNavigate('room-list')}
           onNavigate={handleNavigate}
@@ -75,56 +126,75 @@ function App() {
             {/* 1. Hero & Floating Search Booking */}
             <HeroSection onSearch={handleSearch} />
 
-            {/* 2. Intro: Homestay Nghệ Thuật */}
-            <ArtIntroSection />
+            {/* 2. Giới thiệu về Homestay */}
+            <ArtIntroSection onExploreRooms={() => handleNavigate('room-list')} />
 
-            {/* 3. Dual Promo Banner */}
+            {/* 3. Dual Promo Banner có nền ảnh sang trọng */}
             <PromoVoucherSection onApplyVoucher={() => handleNavigate('vouchers')} />
 
-            {/* 4. Bento Grid: Không Gian Lưu Trú */}
+            {/* 4. Bento Grid: Không Gian Lưu Trú & Cảm Hứng Kiến Trúc */}
             <SpacesBentoSection onExplore={() => handleNavigate('room-list')} />
 
             {/* 5. Dịch Vụ: 4 Vertical Cards */}
             <ServicesSection />
 
-            {/* 6. Các Địa Điểm Nổi Bật: Filter Tabs + 12 Cards Grid */}
+            {/* 6. Điểm Check-in & Danh Thắng */}
             <HighlightPlacesSection onExploreMore={() => handleNavigate('locations')} />
 
-            {/* 7. Dark Quote & 4 Stats */}
+            {/* 7. Trích Dẫn & Triết Lý */}
             <QuoteStatsSection />
 
-            {/* 8. Tìm Phòng Phù Hợp: 4 Room Cards */}
-            <RoomSelectionSection onSelectRoom={handleSelectRoom} />
+            {/* 8. Danh Sách Phòng Nổi Bật (3 tabs) */}
+            <RoomSelectionSection
+              onSelectRoom={handleSelectRoom}
+            />
 
-            {/* 9. Đánh Giá Khách Hàng */}
+            {/* 9. Trải Nghiệm Đánh Giá Khách Hàng (Ghi nhận của khách lưu trú - nằm ở dưới cùng) */}
             <TestimonialsSection />
           </main>
         )}
 
         {currentView === 'room-list' && (
-          <div className="pt-24">
+          <div className="pt-20">
             <RoomListPage
-              onSelectRoom={handleSelectRoom}
+              searchParams={searchParams}
               onGoHome={() => handleNavigate('home')}
+              onSelectRoomType={handleSelectRoomType}
+              onSelectRoomDetail={handleSelectRoom}
+              onUpdateSearchParams={(newParams) => setSearchParams(newParams)}
+              onSearch={handleSearch}
+            />
+          </div>
+        )}
+
+        {currentView === 'search-results' && (
+          <div className="pt-20">
+            <SearchResultPage
+              searchParams={searchParams}
+              onGoHome={() => handleNavigate('home')}
+              onGoRoomList={() => handleNavigate('room-list')}
+              onSelectRoomType={handleSelectRoomType}
+              onSelectRoomDetail={handleSelectRoom}
+              onSearchAgain={handleSearch}
             />
           </div>
         )}
 
         {currentView === 'room-detail' && (
-          <div className="pt-24">
+          <div className="pt-20">
             <RoomDetailPage
               roomId={selectedRoomId}
-              onGoBack={() => handleNavigate('room-list')}
-              onProceedToCheckout={handleProceedToCheckout}
+              onGoBack={() => handleNavigate('home')}
+              onProceedToCheckout={handleProceedToCheckoutFromDetail}
             />
           </div>
         )}
 
         {currentView === 'checkout' && (
-          <div className="pt-24">
+          <div className="pt-20">
             <CheckoutPage
               bookingData={bookingData}
-              onGoBack={() => handleNavigate('room-detail')}
+              onGoBack={() => handleNavigate(searchParams ? 'search-results' : 'room-list')}
               onCompleteBooking={() => handleNavigate('my-account')}
             />
           </div>
@@ -164,9 +234,9 @@ function App() {
         )}
       </div>
 
-      {/* Footer & Chat Widget */}
+      {/* Footer & Contact Speed Dial */}
       <Footer />
-      <AIChatWidget />
+      <ContactFloatingWidget />
     </div>
   );
 }

@@ -1,6 +1,18 @@
-import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateColumn, ManyToOne, JoinColumn, OneToMany, ManyToMany, JoinTable } from 'typeorm';
+import {
+  Entity,
+  PrimaryGeneratedColumn,
+  Column,
+  CreateDateColumn,
+  UpdateDateColumn,
+  ManyToOne,
+  JoinColumn,
+  OneToMany,
+  ManyToMany,
+  JoinTable,
+  Unique,
+} from 'typeorm';
 
-@Entity('apartments')
+@Entity('APARTMENT')
 export class Apartment {
   @PrimaryGeneratedColumn()
   id: number;
@@ -11,11 +23,17 @@ export class Apartment {
   @Column()
   address: string;
 
-  @Column({ type: 'enum', enum: ['active', 'inactive', 'under_construction'], default: 'active' })
-  status: string;
+  @Column({ nullable: true })
+  hotline: string;
+
+  @Column({ type: 'enum', enum: ['active', 'hidden'], default: 'active' })
+  status: 'active' | 'hidden';
 
   @CreateDateColumn()
   created_at: Date;
+
+  @UpdateDateColumn()
+  updated_at: Date;
 }
 
 @Entity('room_types')
@@ -26,20 +44,43 @@ export class RoomType {
   @Column()
   name: string;
 
+  @Column()
+  apartment_id: number;
+
+  @ManyToOne(() => Apartment)
+  @JoinColumn({ name: 'apartment_id' })
+  apartment: Apartment;
+
   @Column('decimal', { precision: 12, scale: 2 })
   base_price: number;
 
   @Column()
   max_occupancy: number;
 
+  @Column({ type: 'text', nullable: true })
+  description: string;
+
+  @Column({ default: '1 giường đôi' })
+  bed_config: string;
+
+  @Column({ default: 28 })
+  area: number;
+
+  @Column({ default: true })
+  is_active: boolean;
+
   @CreateDateColumn()
   created_at: Date;
 }
 
-@Entity('rooms')
+@Entity('ROOMS')
+@Unique(['apartment_id', 'room_number'])
 export class Room {
-  @PrimaryGeneratedColumn()
+  @PrimaryGeneratedColumn({ name: 'room_id' })
   id: number;
+
+  @Column({ name: 'room_id', insert: false, update: false })
+  room_id: number;
 
   @Column()
   apartment_id: number;
@@ -58,11 +99,14 @@ export class Room {
   @Column()
   room_number: string;
 
-  @Column({ type: 'enum', enum: ['available', 'occupied', 'maintenance', 'inactive'], default: 'available' })
-  status: string;
+  @Column({ type: 'enum', enum: ['available', 'maintenance'], default: 'available' })
+  status: 'available' | 'maintenance';
 
   @Column({ type: 'date', nullable: true })
   last_maintenance_date: string;
+
+  @Column({ default: false })
+  is_hidden: boolean;
 
   @CreateDateColumn()
   created_at: Date;
@@ -94,17 +138,20 @@ export class Amenity {
   category: string;
 }
 
-@Entity('room_images')
+@Entity('ROOM_IMAGES')
 export class RoomImage {
   @PrimaryGeneratedColumn()
   id: number;
 
-  @Column()
+  @Column({ nullable: true })
   room_id: number;
 
-  @ManyToOne(() => Room, (room) => room.images, { onDelete: 'CASCADE' })
+  @ManyToOne(() => Room, (room) => room.images, { onDelete: 'CASCADE', nullable: true })
   @JoinColumn({ name: 'room_id' })
   room: Room;
+
+  @Column({ nullable: true })
+  room_types_id: number;
 
   @Column()
   image_url: string;
@@ -113,7 +160,7 @@ export class RoomImage {
   created_at: Date;
 }
 
-@Entity('services')
+@Entity('SERVICES')
 export class Service {
   @PrimaryGeneratedColumn()
   id: number;

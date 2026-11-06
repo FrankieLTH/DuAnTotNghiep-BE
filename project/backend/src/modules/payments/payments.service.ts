@@ -59,7 +59,7 @@ export class PaymentsService {
 
     const booking = await this.bookingRepository.findOne({ where: { id: bookingId } });
     if (booking) {
-      booking.booking_status = 'confirmed';
+      booking.booking_status = 'confirmed' as any;
       await this.bookingRepository.save(booking);
 
       let payment = await this.paymentRepository.findOne({ where: { booking_id: bookingId } });

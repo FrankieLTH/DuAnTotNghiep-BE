@@ -11,8 +11,8 @@ export const HighlightPlacesSection: React.FC<HighlightPlacesSectionProps> = ({ 
     { id: 'all', label: 'Tất cả' },
     { id: 'beach', label: 'Bãi biển' },
     { id: 'nature', label: 'Thiên nhiên' },
-    { id: 'checkin', label: 'Điểm check-in' },
-    { id: 'culture', label: 'Văn hóa' },
+    { id: 'checkin', label: 'Điểm ngắm cảnh' },
+    { id: 'culture', label: 'Văn hóa bản địa' },
   ];
 
   const places = [
@@ -96,38 +96,36 @@ export const HighlightPlacesSection: React.FC<HighlightPlacesSectionProps> = ({ 
       : places.filter((p) => p.category === activeCategory);
 
   return (
-    <section className="py-16 md:py-24 px-4 max-w-7xl mx-auto">
-      {/* Tiêu đề & Nút khám phá bản đồ */}
+    <section className="py-20 md:py-28 px-4 max-w-7xl mx-auto font-sans">
+      {/* Tiêu đề & CTA */}
       <div className="flex flex-col sm:flex-row sm:items-end justify-between mb-8 gap-4">
         <div>
-          <span className="text-xs uppercase tracking-[0.25em] font-semibold text-[#C85A32] block mb-2">
-            Gợi ý hành trình
+          <span className="text-xs uppercase tracking-[0.25em] font-semibold text-[#9E472A] block mb-2">
+            Hành trình khám phá
           </span>
-          <h2 className="font-serif font-bold text-2xl sm:text-3xl md:text-4xl text-[#3E2C23] tracking-[0.12em] uppercase">
-            Các địa điểm nổi bật
+          <h2 className="font-serif font-bold text-3xl sm:text-4xl text-[#1E1B18] tracking-wide">
+            Địa điểm nổi bật quanh Homestay
           </h2>
         </div>
         <button
           onClick={onExploreMore}
-          className="inline-flex items-center gap-2 bg-[#C85A32] hover:bg-[#b04b27] text-white px-5 py-2.5 rounded-full text-xs sm:text-sm font-semibold tracking-wider transition-all self-start sm:self-auto cursor-pointer shadow-sm hover:shadow-md font-sans"
+          className="inline-flex items-center gap-2 border border-[#1E1B18] text-[#1E1B18] hover:bg-[#1E1B18] hover:text-white px-5 py-2 rounded-lg text-xs font-semibold tracking-wider transition-colors self-start sm:self-auto cursor-pointer"
         >
-          <span>Khám phá ngay</span>
-          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14 5l7 7m0 0l-7 7m7-7H3" />
-          </svg>
+          <span>Xem bản đồ chi tiết</span>
+          <span>→</span>
         </button>
       </div>
 
       {/* Filter Tabs */}
-      <div className="flex items-center gap-2 sm:gap-3 overflow-x-auto pb-4 mb-8 scrollbar-none">
+      <div className="flex items-center gap-2 overflow-x-auto pb-4 mb-8 scrollbar-none">
         {categories.map((cat) => (
           <button
             key={cat.id}
             onClick={() => setActiveCategory(cat.id)}
-            className={`px-4 sm:px-5 py-2 rounded-full text-xs font-semibold whitespace-nowrap transition-all cursor-pointer ${
+            className={`px-4 py-2 rounded-lg text-xs font-semibold whitespace-nowrap transition-colors cursor-pointer border ${
               activeCategory === cat.id
-                ? 'bg-[#C85A32] text-white shadow-md'
-                : 'bg-white text-[#7A6B63] hover:text-[#3E2C23] border border-[#E8DFD1]'
+                ? 'bg-[#1E1B18] text-white border-[#1E1B18]'
+                : 'bg-white text-[#736B63] hover:text-[#1E1B18] border-[#E8E3DA]'
             }`}
           >
             {cat.label}
@@ -135,22 +133,22 @@ export const HighlightPlacesSection: React.FC<HighlightPlacesSectionProps> = ({ 
         ))}
       </div>
 
-      {/* Lưới 12 Thẻ Địa Điểm (4 cột x 3 hàng) Đúng Thiết Kế */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3 sm:gap-5">
+      {/* Grid 12 ảnh */}
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
         {filteredPlaces.map((place) => (
           <div
             key={place.id}
-            className="group relative rounded-2xl sm:rounded-3xl overflow-hidden aspect-[4/3] shadow-md hover:shadow-xl transition-all duration-300 cursor-pointer"
+            className="group relative rounded-xl overflow-hidden aspect-[4/3] shadow-xs hover:shadow-md transition-all duration-300 cursor-pointer"
           >
             <img
               src={place.image}
               alt={place.title}
-              className="w-full h-full object-cover object-center group-hover:scale-110 transition-transform duration-500 ease-out"
+              className="w-full h-full object-cover object-center group-hover:scale-105 transition-transform duration-500 ease-out"
             />
-            <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent pointer-events-none" />
+            <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/15 to-transparent pointer-events-none" />
 
-            <div className="absolute bottom-0 left-0 right-0 p-3 sm:p-4 text-white">
-              <h3 className="font-serif font-bold text-xs sm:text-sm md:text-base tracking-wide text-white drop-shadow-md group-hover:text-amber-200 transition-colors uppercase">
+            <div className="absolute bottom-0 left-0 right-0 p-3.5 text-white">
+              <h3 className="font-serif font-bold text-sm sm:text-base text-white group-hover:text-amber-200 transition-colors">
                 {place.title}
               </h3>
             </div>

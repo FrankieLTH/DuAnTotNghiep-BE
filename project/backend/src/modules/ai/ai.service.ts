@@ -23,7 +23,7 @@ export class AIService {
     if (messageLower.includes('mật khẩu') || messageLower.includes('mã pin') || messageLower.includes('mở cửa') || messageLower.includes('passcode')) {
       if (data.user_id) {
         const booking = await this.bookingRepository.findOne({
-          where: { user_id: data.user_id, booking_status: 'checked_in' },
+          where: { user_id: data.user_id, booking_status: 'checked_in' as any },
           relations: ['room', 'room.apartment'],
           order: { created_at: 'DESC' },
         });
@@ -56,7 +56,7 @@ Chúc bạn có chuyến du lịch trải nghiệm thật tuyệt vời tại Ho
 
     // Lưu nhật ký trò chuyện
     const chatLog = this.aiChatLogRepository.create({
-      user_id: data.user_id || null,
+      customer_id: data.user_id || null,
       session_id,
       message: data.message,
       response: responseText,

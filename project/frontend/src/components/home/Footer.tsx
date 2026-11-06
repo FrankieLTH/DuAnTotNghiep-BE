@@ -2,168 +2,154 @@ import React from 'react';
 
 export const Footer: React.FC = () => {
   return (
-    <footer className="w-full bg-[#1C120C] text-[#FDF9F3] overflow-hidden">
-      {/* Banner Ảnh Gallery Decor Sang Trọng Ngang Chân Trang */}
-      <div className="w-full h-44 sm:h-64 md:h-80 relative overflow-hidden">
+    <footer className="w-full bg-[#231812] text-[#FAF6F0] overflow-hidden font-sans">
+      {/* Banner Ảnh Ngang Chân Trang */}
+      <div className="w-full h-36 sm:h-52 relative overflow-hidden">
         <img
           src="https://images.unsplash.com/photo-1618221195710-dd6b41faaea6?auto=format&fit=crop&w=1920&q=85"
-          alt="Đồi Bông Gòn Decor Tủ Gỗ Nghệ Thuật"
-          className="w-full h-full object-cover object-center filter brightness-95"
+          alt="Đồi Bông Gòn Decor"
+          className="w-full h-full object-cover filter brightness-75"
         />
-        {/* Lớp chuyển màu mờ êm dịu */}
-        <div className="absolute inset-0 bg-gradient-to-t from-[#1C120C] via-black/20 to-transparent" />
+        <div className="absolute inset-0 bg-gradient-to-t from-[#231812] via-[#231812]/50 to-transparent" />
       </div>
 
-      {/* Nội Dung Footer Chính 4 Cột */}
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-10 sm:pt-14 pb-12">
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-8 sm:gap-10">
+      {/* Nội Dung 4 Cột Chuẩn Mẫu Hình Ảnh */}
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-8 pb-12">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-8">
           
-          {/* Cột 1 & 2: Logo & Giới thiệu & Mạng xã hội */}
-          <div className="lg:col-span-2 space-y-4">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-full bg-[#C85A32] flex items-center justify-center text-white shrink-0">
-                <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
-                  <path d="m8 3 4 8 5-5 5 15H2L8 3z" />
-                </svg>
-              </div>
-              <div>
-                <span className="font-serif tracking-[0.2em] text-white font-bold text-lg block uppercase leading-tight">
-                  ĐỒI BÔNG GÒN
-                </span>
-                <span className="text-[10px] tracking-[0.25em] text-[#E07A5F] uppercase font-mono block">
-                  HOMESTAY & ART SANCTUARY
-                </span>
-              </div>
+          {/* Cột 1: Đồi Bông Gòn */}
+          <div className="space-y-3">
+            <div>
+              <span className="font-serif font-bold text-base text-white block uppercase tracking-wider">
+                ĐỒI BÔNG GÒN
+              </span>
+              <span className="text-[10px] tracking-widest text-[#F4BE9B] uppercase font-mono block">
+                HOMESTAY VŨNG TÀU
+              </span>
             </div>
 
-            <p className="font-sans text-xs sm:text-sm text-white/70 max-w-sm leading-relaxed font-light">
-              Nơi tìm về sự an yên giữa biển trời và thiên nhiên Vũng Tàu. Trải nghiệm hệ thống tự nhận phòng thông minh 24/7 và dịch vụ mộc mạc tận tâm.
+            <p className="text-xs text-white/70 leading-relaxed font-light">
+              Khu nghỉ dưỡng ven biển mộc mạc và an yên nép mình bên triền đồi ngắm trọn hoàng hôn phố biển Vũng Tàu. Trải nghiệm tự chủ tự do với hệ thống check-in thông minh.
             </p>
 
-            {/* Icon Mạng Xã Hội */}
-            <div className="flex items-center gap-3 pt-2">
-              <a
-                href="#facebook"
-                aria-label="Facebook"
-                className="w-9 h-9 rounded-full bg-white/10 hover:bg-[#C85A32] flex items-center justify-center text-white transition-colors"
-              >
-                <svg className="w-4 h-4 fill-current" viewBox="0 0 24 24">
-                  <path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z" />
-                </svg>
-              </a>
-              <a
-                href="#instagram"
-                aria-label="Instagram"
-                className="w-9 h-9 rounded-full bg-white/10 hover:bg-[#C85A32] flex items-center justify-center text-white transition-colors"
-              >
-                <svg className="w-4 h-4 fill-current" viewBox="0 0 24 24">
-                  <path d="M12 2.163c3.204 0 3.584.012 4.85.07 3.252.148 4.771 1.691 4.919 4.919.058 1.265.069 1.645.069 4.849 0 3.205-.012 3.584-.069 4.849-.149 3.225-1.664 4.771-4.919 4.919-1.266.058-1.644.07-4.85.07-3.204 0-3.584-.012-4.849-.07-3.26-.149-4.771-1.699-4.919-4.92-.058-1.265-.07-1.644-.07-4.849 0-3.204.013-3.583.07-4.849.149-3.227 1.664-4.771 4.919-4.919 1.266-.057 1.645-.069 4.849-.069zm0-2.163c-3.259 0-3.667.014-4.947.072-4.358.2-6.78 2.618-6.98 6.98-.059 1.281-.073 1.689-.073 4.948 0 3.259.014 3.668.072 4.948.2 4.358 2.618 6.78 6.98 6.98 1.281.058 1.689.072 4.948.072 3.259 0 3.668-.014 4.948-.072 4.354-.2 6.782-2.618 6.979-6.98.059-1.28.073-1.689.073-4.948 0-3.259-.014-3.667-.072-4.947-.196-4.354-2.617-6.78-6.979-6.98-1.281-.059-1.69-.073-4.949-.073zm0 5.838c-3.403 0-6.162 2.759-6.162 6.162s2.759 6.163 6.162 6.163 6.162-2.759 6.162-6.163c0-3.403-2.759-6.162-6.162-6.162zm0 10.162c-2.209 0-4-1.79-4-4 0-2.209 1.791-4 4-4s4 1.791 4 4c0 2.21-1.791 4-4 4zm6.406-11.845c-.796 0-1.441.645-1.441 1.44s.645 1.44 1.441 1.44c.795 0 1.439-.645 1.439-1.44s-.644-1.44-1.439-1.44z" />
-                </svg>
-              </a>
-              <a
-                href="#tiktok"
-                aria-label="TikTok"
-                className="w-9 h-9 rounded-full bg-white/10 hover:bg-[#C85A32] flex items-center justify-center text-white transition-colors text-xs font-bold"
-              >
-                TT
-              </a>
+            <div className="inline-flex items-center gap-2 p-2.5 rounded-xl bg-white/5 border border-white/10 text-xs text-white/80">
+              <span className="text-[#C4572E]">🔒</span>
+              <span>Cam kết Smart Lock tự động 24/7 - Không chạm, an toàn</span>
             </div>
           </div>
 
-          {/* Cột 3: Về Chúng Tôi */}
-          <div>
-            <h4 className="font-serif font-bold text-sm tracking-wider uppercase text-white mb-4">
-              Về Chúng Tôi
+          {/* Cột 2: Hệ thống chi nhánh */}
+          <div className="space-y-3">
+            <h4 className="font-serif font-bold text-sm text-white uppercase tracking-wider">
+              Hệ thống chi nhánh
             </h4>
-            <ul className="space-y-2.5 text-xs text-white/70">
-              <li>
-                <a href="#about" className="hover:text-[#E07A5F] transition-colors">
-                  Giới thiệu Homestay
-                </a>
+            <div className="space-y-3 text-xs text-white/75 font-light">
+              <div>
+                <strong className="text-white block font-medium">Chi nhánh 1: Triền Núi Nhỏ</strong>
+                <p className="text-white/65 mt-0.5">
+                  Đường Hải Đăng, Phường 2, TP. Vũng Tàu (Cách Bãi Sau 700m, yên tĩnh ngắm trọn triền cây bông gòn)
+                </p>
+              </div>
+
+              <div>
+                <strong className="text-white block font-medium">Chi nhánh 2: Lưng Chừng Biển</strong>
+                <p className="text-white/65 mt-0.5">
+                  Đoạn đầu đường Hải Đăng, view toàn cảnh Bãi Trước đón gió biển mát lành quanh năm
+                </p>
+              </div>
+            </div>
+          </div>
+
+          {/* Cột 3: Chính sách & Hỗ trợ */}
+          <div className="space-y-3">
+            <h4 className="font-serif font-bold text-sm text-white uppercase tracking-wider">
+              Chính sách & Hỗ trợ
+            </h4>
+            <ul className="space-y-2 text-xs text-white/70 font-light">
+              <li className="flex items-center gap-1.5 hover:text-white transition-colors cursor-pointer">
+                <span>›</span>
+                <span>Quy trình Check-in & Check-out thông minh</span>
               </li>
-              <li>
-                <a href="#spaces" className="hover:text-[#E07A5F] transition-colors">
-                  Không gian nghệ thuật
-                </a>
+              <li className="flex items-center gap-1.5 hover:text-white transition-colors cursor-pointer">
+                <span>›</span>
+                <span>Chính sách đặt phòng & Hủy cọc linh hoạt</span>
               </li>
-              <li>
-                <a href="#rooms" className="hover:text-[#E07A5F] transition-colors">
-                  Hệ thống phòng nghỉ
-                </a>
+              <li className="flex items-center gap-1.5 hover:text-white transition-colors cursor-pointer">
+                <span>›</span>
+                <span>Nội quy lưu trú & Bảo tồn không gian yên tĩnh</span>
               </li>
-              <li>
-                <a href="#services" className="hover:text-[#E07A5F] transition-colors">
-                  Dịch vụ & Tiện ích
-                </a>
+              <li className="flex items-center gap-1.5 hover:text-white transition-colors cursor-pointer">
+                <span>›</span>
+                <span>Hỗ trợ khách hàng qua Hotline & Zalo 24/7</span>
               </li>
             </ul>
           </div>
 
-          {/* Cột 4: Thông Tin Liên Hệ & Địa Chỉ */}
-          <div>
-            <h4 className="font-serif font-bold text-sm tracking-wider uppercase text-white mb-4">
-              Liên Hệ & Tọa Độ
+          {/* Cột 4: Liên hệ trực tiếp */}
+          <div className="space-y-3">
+            <h4 className="font-serif font-bold text-sm text-white uppercase tracking-wider">
+              Liên hệ trực tiếp
             </h4>
-            <ul className="space-y-2.5 text-xs text-white/70 font-light">
-              <li className="flex items-start gap-2">
-                <span className="text-[#E07A5F]">📍</span>
-                <span>Đường Hải Đăng, Phường 2, TP. Vũng Tàu</span>
-              </li>
-              <li className="flex items-center gap-2">
-                <span className="text-[#E07A5F]">📞</span>
-                <span className="font-medium text-white">0938 123 456</span>
-              </li>
-              <li className="flex items-center gap-2">
-                <span className="text-[#E07A5F]">✉️</span>
-                <span>booking@doibonggon.vn</span>
-              </li>
-              <li className="flex items-center gap-2">
-                <span className="text-[#E07A5F]">⏰</span>
-                <span>Hỗ trợ tự check-in 24/7</span>
-              </li>
-            </ul>
-          </div>
+            <div className="space-y-2 text-xs text-white/75 font-light">
+              <div>
+                <span className="text-[10px] uppercase font-mono tracking-wider text-white/50 block">
+                  HOTLINE TỔNG ĐÀI 24/7
+                </span>
+                <a
+                  href="tel:0908888888"
+                  className="text-base font-bold text-[#F4BE9B] hover:underline"
+                >
+                  0908.888.888
+                </a>
+              </div>
 
-          {/* Cột 5: Hỗ Trợ & Chính Sách */}
-          <div>
-            <h4 className="font-serif font-bold text-sm tracking-wider uppercase text-white mb-4">
-              Hỗ Trợ
-            </h4>
-            <ul className="space-y-2.5 text-xs text-white/70">
-              <li>
-                <a href="#rules" className="hover:text-[#E07A5F] transition-colors">
-                  Chính sách đặt & hủy phòng
+              <div>
+                <span className="text-[10px] uppercase font-mono tracking-wider text-white/50 block">
+                  EMAIL
+                </span>
+                <span className="text-white/80">stay@doibonggon.vn</span>
+              </div>
+
+              {/* Nút mạng xã hội */}
+              <div className="flex items-center gap-2 pt-2">
+                <a
+                  href="https://m.me/homestaydoibonggon"
+                  target="_blank"
+                  rel="noreferrer"
+                  className="w-8 h-8 rounded-lg bg-white/10 hover:bg-[#C4572E] flex items-center justify-center text-white transition-colors text-xs"
+                  aria-label="Messenger"
+                >
+                  ✉
                 </a>
-              </li>
-              <li>
-                <a href="#checkin-guide" className="hover:text-[#E07A5F] transition-colors">
-                  Hướng dẫn mở khóa Smart Lock
+                <a
+                  href="https://zalo.me/0908888888"
+                  target="_blank"
+                  rel="noreferrer"
+                  className="w-8 h-8 rounded-lg bg-white/10 hover:bg-[#C4572E] flex items-center justify-center text-white transition-colors text-xs font-bold"
+                  aria-label="Zalo"
+                >
+                  Z
                 </a>
-              </li>
-              <li>
-                <a href="#faq" className="hover:text-[#E07A5F] transition-colors">
-                  Câu hỏi thường gặp (FAQ)
+                <a
+                  href="tel:0908888888"
+                  className="w-8 h-8 rounded-lg bg-white/10 hover:bg-[#C4572E] flex items-center justify-center text-white transition-colors text-xs"
+                  aria-label="Gọi điện"
+                >
+                  📞
                 </a>
-              </li>
-              <li>
-                <a href="#privacy" className="hover:text-[#E07A5F] transition-colors">
-                  Chính sách bảo mật
-                </a>
-              </li>
-            </ul>
+              </div>
+            </div>
           </div>
         </div>
 
         {/* Dòng Bản Quyền Cuối Trang */}
-        <div className="mt-12 pt-6 border-t border-white/10 flex flex-col sm:flex-row items-center justify-between text-[11px] text-white/50 gap-3">
-          <p>© 2026 Đồi Bông Gòn Homestay. All rights reserved.</p>
-          <p className="flex items-center gap-4">
-            <span className="hover:text-white transition-colors cursor-pointer">Bảo mật</span>
+        <div className="mt-10 pt-5 border-t border-white/10 flex flex-col sm:flex-row items-center justify-between text-[11px] text-white/50 gap-3">
+          <p>© 2026 Đồi Bông Gòn Homestay Vũng Tàu. Bản quyền thuộc về Đồi Bông Gòn Sanctuary.</p>
+          <div className="flex items-center gap-4">
+            <span className="hover:text-white transition-colors cursor-pointer">Điều khoản dịch vụ</span>
             <span>•</span>
-            <span className="hover:text-white transition-colors cursor-pointer">Điều khoản</span>
-            <span>•</span>
-            <span className="hover:text-white transition-colors cursor-pointer">Sơ đồ website</span>
-          </p>
+            <span className="hover:text-white transition-colors cursor-pointer">Chính sách bảo mật</span>
+          </div>
         </div>
       </div>
     </footer>

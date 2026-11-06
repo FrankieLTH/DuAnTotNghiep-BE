@@ -1,92 +1,208 @@
 import React from 'react';
 
+/* ─────────────────────────────────────────────────────────────────────────────
+   QuoteStatsSection – CẢM HỨNG KIẾN TRÚC
+   Bố cục: Tiêu đề serif nền + polaroid rải ngẫu hứng che nhẹ chữ tiêu đề.
+   ──────────────────────────────────────────────────────────────────────────── */
+
 export const QuoteStatsSection: React.FC = () => {
-  const stats = [
-    {
-      id: 1,
-      value: '10+',
-      label: 'Năm gắn bó & phát triển',
-      desc: 'Được xây dựng từ tình yêu thiên nhiên Vũng Tàu',
-      icon: (
-        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-        </svg>
-      ),
-    },
-    {
-      id: 2,
-      value: '5.000+',
-      label: 'Lượt khách hài lòng',
-      desc: 'Nhận được sự tin yêu từ du khách khắp mọi miền',
-      icon: (
-        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M14 10h4.764a2 2 0 011.789 2.894l-3.5 7A2 2 0 0115.263 21h-4.017c-.163 0-.326-.02-.485-.06L7 20m7-10V5a2 2 0 00-2-2h-.095c-.5 0-.905.405-.905.905 0 .714-.211 1.412-.608 2.006L7 11v9m7-10h-2M7 20H5a2 2 0 01-2-2v-6a2 2 0 012-2h2.5" />
-        </svg>
-      ),
-    },
-    {
-      id: 3,
-      value: '100%',
-      label: 'Nguyên bản & Mộc mạc',
-      desc: 'Vật liệu tự nhiên, thân thiện với môi trường',
-      icon: (
-        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z" />
-        </svg>
-      ),
-    },
-    {
-      id: 4,
-      value: '24/7',
-      label: 'Hỗ trợ & Tự check-in',
-      desc: 'Khóa thông minh riêng tư, hỗ trợ chu đáo mọi lúc',
-      icon: (
-        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
-        </svg>
-      ),
-    },
-  ];
-
   return (
-    <section className="bg-[#1C120C] text-[#FDF9F3] py-20 md:py-28 px-4 relative overflow-hidden">
-      {/* Họa tiết ánh sáng mềm phía góc */}
-      <div className="absolute top-0 left-1/2 -translate-x-1/2 w-96 h-96 bg-[#C85A32]/10 rounded-full blur-3xl pointer-events-none" />
+    <section
+      className="relative overflow-hidden bg-[#EDE8DF] py-20 md:py-28 px-4 sm:px-6 lg:px-8 border-b border-[#D8D0C4]"
+      style={{ minHeight: '600px' }}
+    >
+      {/* ── Grain texture overlay ── */}
+      <div
+        className="pointer-events-none absolute inset-0 opacity-[0.035]"
+        style={{
+          backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='300' height='300'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.75' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='300' height='300' filter='url(%23n)' opacity='1'/%3E%3C/svg%3E")`,
+        }}
+      />
 
-      <div className="max-w-6xl mx-auto relative z-10">
-        {/* Khối trích dẫn phong cách triết lý nghệ thuật */}
-        <div className="text-center mb-16 md:mb-24">
-          <p className="font-serif italic text-3xl sm:text-5xl md:text-6xl text-white tracking-wide leading-tight mb-4">
-            “Đến lúc nào, vào lúc đó.”
+      <div className="relative max-w-6xl mx-auto">
+
+        {/* ── HÀNG TRÊN: Label + CTA Button cùng dòng ── */}
+        <div className="flex items-center justify-between mb-6 relative z-20">
+          <p className="text-[11px] sm:text-xs font-mono uppercase tracking-[0.25em] text-[#9C8C7E]">
+            Cảm hứng kiến trúc &amp; không gian
           </p>
-          <p className="font-sans text-xs sm:text-sm md:text-base text-amber-200/80 tracking-[0.25em] uppercase font-light">
-            Một trạm dừng cho tâm hồn bình yên
+          <a
+            href="/rooms"
+            className="inline-flex items-center gap-2 text-[#241C18] border border-[#241C18]/30 hover:border-[#241C18] hover:bg-[#241C18] hover:text-white px-5 py-2.5 rounded-full text-xs font-semibold tracking-widest uppercase transition-all duration-300 active:scale-95"
+          >
+            Xem toàn bộ không gian
+            <span className="text-base leading-none">→</span>
+          </a>
+        </div>
+
+        {/* ── TIÊU ĐỀ SERIF (z-0) — giảm size hợp lý ── */}
+        <div className="relative z-0 select-none pointer-events-none">
+          <h2
+            className="font-serif font-light leading-[1.05] uppercase text-[#241C18]"
+            style={{ fontSize: 'clamp(2.2rem, 5.5vw, 4.5rem)', letterSpacing: '-0.01em' }}
+          >
+            <span className="block">KỲ NGHỈ SẼ</span>
+            <span className="block text-[#C4572E]">ĐƯỢC GHI NHỚ</span>
+            <span className="block">MÃI MÃI!</span>
+          </h2>
+
+          {/* mô tả nhỏ */}
+          <p className="mt-6 sm:mt-8 text-sm sm:text-base text-[#6E6359] max-w-sm leading-relaxed font-normal pointer-events-auto">
+            Từng góc nhỏ tại Đồi Bông Gòn được xây dựng bằng tay — chất liệu bản địa, hơi thở núi rừng Vũng Tàu.
           </p>
         </div>
 
-        {/* Dòng phân cách mỏng vàng đồng */}
-        <div className="w-24 h-px bg-gradient-to-r from-transparent via-[#E07A5F]/60 to-transparent mx-auto mb-16" />
+        {/* ── KHUNG POLAROID RẢI NGẪ HỨNG — che nhẹ title ── */}
 
-        {/* 4 Cột Thông Số Uy Tín */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-6 sm:gap-8">
-          {stats.map((item) => (
-            <div key={item.id} className="text-center group">
-              <div className="w-10 h-10 mx-auto rounded-full bg-white/5 border border-white/10 flex items-center justify-center text-[#E07A5F] mb-4 group-hover:scale-110 group-hover:bg-[#C85A32]/20 transition-all">
-                {item.icon}
-              </div>
-              <div className="font-serif font-bold text-3xl sm:text-4xl text-white tracking-tight mb-1 group-hover:text-amber-200 transition-colors">
-                {item.value}
-              </div>
-              <div className="font-sans text-xs sm:text-sm font-semibold text-white/90 mb-1">
-                {item.label}
-              </div>
-              <div className="font-sans text-[11px] text-white/60 leading-relaxed font-light hidden sm:block">
-                {item.desc}
+        {/* POLAROID 1: trên-phải, nghiêng -6°, che nhẹ dòng "KỲ NGHỈ SẼ" */}
+        <div
+          className="absolute"
+          style={{
+            top: '12%',
+            right: '3%',
+            width: 'clamp(200px, 20vw, 280px)',
+            transform: 'rotate(-6deg)',
+            zIndex: 12,
+          }}
+        >
+          <div
+            className="bg-white p-3 pb-8 shadow-2xl"
+            style={{ boxShadow: '0 20px 60px -8px rgba(36,28,24,0.28), 0 4px 12px -2px rgba(0,0,0,0.1)' }}
+          >
+            <div className="w-full overflow-hidden" style={{ aspectRatio: '4/5' }}>
+              <img
+                src="https://images.unsplash.com/photo-1600585154340-be6161a56a0c?auto=format&fit=crop&w=700&q=80"
+                alt="Quá trình xây dựng Đồi Bông Gòn"
+                className="w-full h-full object-cover filter contrast-[1.05] saturate-90"
+                loading="lazy"
+              />
+            </div>
+            <p className="mt-2 text-center text-[10px] text-[#5C4E43] tracking-widest uppercase font-mono">
+              Xây dựng · Mộc bản địa
+            </p>
+          </div>
+          <div
+            className="absolute -top-3 left-1/2 -translate-x-1/2 bg-[#C4572E] text-white text-[9px] font-mono uppercase tracking-widest px-2 py-0.5 rotate-1"
+            style={{ zIndex: 13 }}
+          >
+            2022
+          </div>
+        </div>
+
+        {/* POLAROID 2: giữa-phải, nghiêng +3°, che nhẹ dòng "ĐƯỢC GHI NHỚ" */}
+        <div
+          className="absolute"
+          style={{
+            top: '38%',
+            right: '20%',
+            width: 'clamp(170px, 16vw, 230px)',
+            transform: 'rotate(3deg)',
+            zIndex: 14,
+          }}
+        >
+          <div
+            className="bg-[#FAF8F5] p-3 pb-7 shadow-2xl"
+            style={{ boxShadow: '0 16px 48px -6px rgba(36,28,24,0.22), 0 4px 10px -2px rgba(0,0,0,0.08)' }}
+          >
+            <div className="w-full overflow-hidden" style={{ aspectRatio: '1/1' }}>
+              <img
+                src="https://images.unsplash.com/photo-1609766857166-0e81b5a5e6c2?auto=format&fit=crop&w=600&q=80"
+                alt="Không gian mộc mạc ngoài trời"
+                className="w-full h-full object-cover filter saturate-[0.9]"
+                loading="lazy"
+              />
+            </div>
+            <div className="mt-2 px-1">
+              <p className="text-[10px] italic text-[#241C18] leading-snug">
+                "An yên không tìm đâu xa, chỉ cần tìm đúng chỗ."
+              </p>
+              <div className="flex items-center gap-1.5 mt-1.5">
+                <img
+                  src="https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&w=80&q=80"
+                  alt="Hoàng Nam"
+                  className="w-5 h-5 rounded-full object-cover"
+                />
+                <span className="text-[9px] text-[#8C7A70] font-semibold font-mono uppercase tracking-wider">
+                  Hoàng Nam · HCM
+                </span>
               </div>
             </div>
-          ))}
+          </div>
         </div>
+
+        {/* POLAROID 3: dưới-phải, nghiêng -3° */}
+        <div
+          className="absolute"
+          style={{
+            bottom: '10%',
+            right: '5%',
+            width: 'clamp(190px, 18vw, 260px)',
+            transform: 'rotate(-3deg)',
+            zIndex: 15,
+          }}
+        >
+          <div
+            className="bg-white p-3 pb-7 shadow-2xl"
+            style={{ boxShadow: '0 20px 55px -8px rgba(36,28,24,0.30), 0 4px 12px -2px rgba(0,0,0,0.1)' }}
+          >
+            <div className="w-full overflow-hidden" style={{ aspectRatio: '5/4' }}>
+              <img
+                src="https://images.unsplash.com/photo-1562778612-e1e0cda9915c?auto=format&fit=crop&w=700&q=80"
+                alt="Cảnh quan đồi núi hoang sơ"
+                className="w-full h-full object-cover filter contrast-[1.02]"
+                loading="lazy"
+              />
+            </div>
+            <div className="mt-2 px-1">
+              <p className="text-[10px] italic text-[#241C18] leading-snug">
+                "View từ phòng nhìn ra triền đồi — đẹp không kém resort 5 sao."
+              </p>
+              <div className="flex items-center gap-1.5 mt-1.5 border-t border-[#EEE8DF] pt-1.5">
+                <img
+                  src="https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=80&q=80"
+                  alt="Minh Anh"
+                  className="w-5 h-5 rounded-full object-cover"
+                />
+                <span className="text-[9px] text-[#8C7A70] font-semibold font-mono uppercase tracking-wider">
+                  Minh Anh · Hà Nội
+                </span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* POLAROID 4 (nhỏ, tạo chiều sâu): trên-giữa phải */}
+        <div
+          className="absolute hidden lg:block"
+          style={{
+            top: '5%',
+            right: '24%',
+            width: 'clamp(110px, 10vw, 150px)',
+            transform: 'rotate(8deg)',
+            zIndex: 11,
+            opacity: 0.8,
+          }}
+        >
+          <div
+            className="bg-[#F5F0E8] p-2 pb-5"
+            style={{ boxShadow: '0 8px 30px -4px rgba(36,28,24,0.18)' }}
+          >
+            <div className="w-full overflow-hidden" style={{ aspectRatio: '1/1' }}>
+              <img
+                src="https://images.unsplash.com/photo-1476514525535-07fb3b4ae5f1?auto=format&fit=crop&w=400&q=70"
+                alt="Bầu trời và thiên nhiên"
+                className="w-full h-full object-cover filter saturate-75 sepia-[0.15]"
+                loading="lazy"
+              />
+            </div>
+          </div>
+        </div>
+
       </div>
+
+      {/* ── Dây kẻ ngang trang trí ── */}
+      <div className="absolute bottom-12 left-8 right-8 h-px bg-[#C9BFB2]/40 z-0 pointer-events-none hidden md:block" />
+
     </section>
   );
 };

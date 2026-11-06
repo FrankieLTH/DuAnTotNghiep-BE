@@ -4,9 +4,22 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { ScheduleModule } from '@nestjs/schedule';
 import { EventEmitterModule } from '@nestjs/event-emitter';
 
-import { Role, User } from './entities/user.entity';
+import { Role, User, Staff, Customer } from './entities/user.entity';
 import { Apartment, RoomType, Room, Amenity, RoomImage, Service } from './entities/room.entity';
-import { Lock, Voucher, Booking, LockPin, PaymentMethod, Payment, Refund, AIChatLog } from './entities/booking.entity';
+import {
+  Lock,
+  Voucher,
+  Booking,
+  BookingGuest,
+  BookingRoom,
+  Transaction,
+  AuditLog,
+  LockPin,
+  PaymentMethod,
+  Payment,
+  Refund,
+  AIChatLog,
+} from './entities/booking.entity';
 
 import { AuthModule } from './modules/auth/auth.module';
 import { RoomsModule } from './modules/rooms/rooms.module';
@@ -35,8 +48,8 @@ import { CronModule } from './modules/cron/cron.module';
         password: config.get<string>('DB_PASSWORD', ''),
         database: config.get<string>('DB_DATABASE', 'duantotnghiep'),
         entities: [
-          Role, User, Apartment, RoomType, Room, Amenity, RoomImage, Service,
-          Lock, Voucher, Booking, LockPin, PaymentMethod, Payment, Refund, AIChatLog
+          Role, User, Staff, Customer, Apartment, RoomType, Room, Amenity, RoomImage, Service,
+          Lock, Voucher, Booking, BookingGuest, BookingRoom, Transaction, AuditLog, LockPin, PaymentMethod, Payment, Refund, AIChatLog
         ],
         synchronize: false, // Dùng schema MySQL có sẵn
         logging: false,
