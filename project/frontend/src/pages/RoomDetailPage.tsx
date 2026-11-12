@@ -1,16 +1,31 @@
 import React, { useState, useEffect } from 'react';
 import { Button } from '../components/ui/Button';
 import { Badge } from '../components/ui/Badge';
-import { getRoomById, getServices, getVouchers, RoomItem, ServiceItem, VoucherItem } from '../services/dataService';
+import {
+  getRoomById,
+  getServices,
+  getVouchers,
+  RoomItem,
+  ServiceItem,
+  VoucherItem,
+  SearchParams,
+  BookingDraft,
+  BookingGuestSlot,
+} from '../services/dataService';
+import type { Basket } from '@shared/index';
 
 interface RoomDetailPageProps {
   roomId?: number;
+  searchParams?: SearchParams;
+  sourceBasket?: Basket | null;
   onGoBack: () => void;
   onProceedToCheckout: (bookingDetails: any) => void;
 }
 
 export const RoomDetailPage: React.FC<RoomDetailPageProps> = ({
   roomId = 1,
+  searchParams,
+  sourceBasket,
   onGoBack,
   onProceedToCheckout,
 }) => {
@@ -22,19 +37,26 @@ export const RoomDetailPage: React.FC<RoomDetailPageProps> = ({
   // Gallery active photo
   const [activePhotoIdx, setActivePhotoIdx] = useState<number>(0);
 
-  // Booking parameters
+  // Booking parameters - Sử dụng thông tin từ searchParams nếu có
   const today = new Date();
   const tomorrow = new Date(today);
   tomorrow.setDate(today.getDate() + 1);
 
   const formatDateStr = (d: Date) => d.toISOString().split('T')[0];
 
-  const [checkInDate, setCheckInDate] = useState(formatDateStr(today));
-  const [checkOutDate, setCheckOutDate] = useState(formatDateStr(tomorrow));
-  const [guestCount, setGuestCount] = useState<number>(2);
+  const [checkInDate, setCheckInDate] = useState(
+    searchParams?.checkIn || formatDateStr(today)
+  );
+  const [checkOutDate, setCheckOutDate] = useState(
+    searchParams?.checkOut || formatDateStr(tomorrow)
+  );
+  const [guestCount, setGuestCount] = useState<number>(
+    searchParams ? (searchParams.adults || 1) + (searchParams.children || 0) : 2
+  );
 
   // Selected add-on services: Map of serviceId -> boolean
   const [selectedServiceIds, setSelectedServiceIds] = useState<Record<number, boolean>>({
+    10: !!sourceBasket?.extraMattressTotal, // Tự động chọn nệm phụ nếu giỏ trước đó có chọn
     1: false, // Thuê xe máy
     3: true,  // Set BBQ
   });
@@ -139,6 +161,188 @@ export const RoomDetailPage: React.FC<RoomDetailPageProps> = ({
       ...prev,
       [sId]: !prev[sId],
     }));
+  };
+
+  const handleProceedWithBasket = () => {
+    if (!sourceBasket || !room) return;
+
+    const selectedBookingRooms = sourceBasket.items.map((it) => ({
+      room_type_id: it.roomTypeId,
+      room_type_name: it.roomTypeName,
+      room_type_image: it.image || room.images[0] || 'https://images.unsplash.com/photo-1590490360182-c33d57733427?auto=format&fit=crop&w=800&q=80',
+      count: it.quantity,
+      price: it.basePrice || Math.round(it.unitPrice / nights),
+      max_occupancy: 2,
+      has_extra_bed: it.hasExtraMattress,
+    }));
+
+    const numAdults = searchParams?.adults || 2;
+    const numChildren = searchParams?.children || 0;
+    const slots: BookingGuestSlot[] = [];
+    let slotIdx = 1;
+    for (let i = 0; i < numAdults; i++) {
+      slots.push({
+        id: `slot-${slotIdx}`,
+        slot_index: slotIdx,
+        guest_type: 'adult',
+        is_booker: slotIdx === 1,
+        is_foreigner: false,
+        full_name: '',
+        date_of_birth: '',
+        id_type: 'cccd',
+        id_number: '',
+        slot_status: 'empty',
+        retry_count: 0,
+      });
+      slotIdx++;
+    }
+    for (let i = 0; i < numChildren; i++) {
+      slots.push({
+        id: `slot-${slotIdx}`,
+        slot_index: slotIdx,
+        guest_type: 'child',
+        is_booker: false,
+        is_foreigner: false,
+        full_name: '',
+        date_of_birth: '',
+        id_type: 'cccd',
+        id_number: '',
+        slot_status: 'empty',
+        retry_count: 0,
+      });
+      slotIdx++;
+    }
+
+    const draft: BookingDraft = {
+      id: `draft_${Date.now()}`,
+      booking_code: `BK-2026-${Math.floor(1000 + Math.random() * 9000)}`,
+      apartment_id: room.apartment_id,
+      apartment_name: room.apartment_name,
+      apartment_address: room.address,
+      room_type_id: room.room_type_id || room.id,
+      room_type_name: room.room_type_name,
+      room_type_image: room.images[0] || '',
+      num_rooms: sourceBasket.totalRooms,
+      booking_rooms: selectedBookingRooms,
+      total_capacity: sourceBasket.totalCapacity + (sourceBasket.extraMattressTotal ? 1 : 0),
+      has_extra_bed: !!sourceBasket.extraMattressTotal,
+      extra_bed_fee: sourceBasket.extraMattressTotal || 0,
+      check_in_date: checkInDate,
+      check_out_date: checkOutDate,
+      nights,
+      num_adults: numAdults,
+      num_children: numChildren,
+      children_ages: searchParams?.childrenAges || [],
+      price_breakdown: [
+        {
+          date: checkInDate,
+          dayOfWeek: 'Ngày nhận phòng',
+          basePrice: room.base_price,
+          extraFeePercent: 0,
+          extraFeeAmount: 0,
+          finalPricePerRoom: room.base_price,
+        },
+      ],
+      room_subtotal: sourceBasket.totalPrice,
+      extra_fee_total: sourceBasket.extraMattressTotal || 0,
+      service_total: 0,
+      discount_amount: sourceBasket.discountAmount || 0,
+      total_price: sourceBasket.totalPrice,
+      hold_expires_at: Date.now() + 30 * 60 * 1000,
+      status: 'pending_info',
+      booker: {
+        full_name: '',
+        email: '',
+        phone: '',
+        is_staying: true,
+        email_verified: false,
+        consent_data_protection: false,
+      },
+      guests: slots,
+    };
+
+    onProceedToCheckout(draft);
+  };
+
+  const handleProceedSingleRoom = () => {
+    if (!room) return;
+    const hasExtraMattress = !!selectedServiceIds[10];
+    const extraMattressFee = hasExtraMattress ? 150000 * nights : 0;
+    const finalRoomPrice = totalPrice;
+
+    const draft: BookingDraft = {
+      id: `draft_${Date.now()}`,
+      booking_code: `BK-2026-${Math.floor(1000 + Math.random() * 9000)}`,
+      apartment_id: room.apartment_id,
+      apartment_name: room.apartment_name,
+      apartment_address: room.address,
+      room_type_id: room.room_type_id || room.id,
+      room_type_name: room.room_type_name,
+      room_type_image: room.images[0] || '',
+      num_rooms: 1,
+      booking_rooms: [
+        {
+          room_type_id: room.room_type_id || room.id,
+          room_type_name: room.room_type_name,
+          room_type_image: room.images[0] || '',
+          count: 1,
+          price: room.base_price,
+          max_occupancy: room.max_occupancy + (hasExtraMattress ? 1 : 0),
+          has_extra_bed: hasExtraMattress,
+        },
+      ],
+      total_capacity: room.max_occupancy + (hasExtraMattress ? 1 : 0),
+      has_extra_bed: hasExtraMattress,
+      extra_bed_fee: extraMattressFee,
+      check_in_date: checkInDate,
+      check_out_date: checkOutDate,
+      nights,
+      num_adults: searchParams?.adults || Math.min(guestCount, room.max_occupancy),
+      num_children: searchParams?.children || 0,
+      children_ages: searchParams?.childrenAges || [],
+      price_breakdown: [
+        {
+          date: checkInDate,
+          dayOfWeek: 'Ngày nhận phòng',
+          basePrice: room.base_price,
+          extraFeePercent: 0,
+          extraFeeAmount: 0,
+          finalPricePerRoom: room.base_price,
+        },
+      ],
+      room_subtotal: roomPriceTotal,
+      extra_fee_total: extraMattressFee,
+      service_total: servicesTotal,
+      discount_amount: discountAmount,
+      total_price: finalRoomPrice,
+      hold_expires_at: Date.now() + 30 * 60 * 1000,
+      status: 'pending_info',
+      booker: {
+        full_name: '',
+        email: '',
+        phone: '',
+        is_staying: true,
+        email_verified: false,
+        consent_data_protection: false,
+      },
+      guests: [
+        {
+          id: 'slot-1',
+          slot_index: 1,
+          guest_type: 'adult',
+          is_booker: true,
+          is_foreigner: false,
+          full_name: '',
+          date_of_birth: '',
+          id_type: 'cccd',
+          id_number: '',
+          slot_status: 'empty',
+          retry_count: 0,
+        },
+      ],
+    };
+
+    onProceedToCheckout(draft);
   };
 
   if (loading) {
@@ -511,32 +715,37 @@ export const RoomDetailPage: React.FC<RoomDetailPageProps> = ({
               </div>
 
               {/* CTA Action */}
-              <Button
-                variant="primary"
-                size="lg"
-                className="w-full font-bold uppercase tracking-wider"
-                disabled={room.status !== 'available'}
-                onClick={() =>
-                  onProceedToCheckout({
-                    roomId: room.id,
-                    roomNumber: room.room_number,
-                    roomTitle: roomTitle,
-                    branch: room.apartment_name,
-                    address: room.address,
-                    city: room.city,
-                    checkInDate,
-                    checkOutDate,
-                    nights,
-                    guestCount,
-                    selectedServices: services.filter((s) => selectedServiceIds[s.id]),
-                    voucherCode: appliedVoucherCode,
-                    discountAmount,
-                    totalPrice,
-                  })
-                }
-              >
-                {room.status === 'available' ? '🔒 Đặt Phòng & Nhận Mã PIN' : 'Phòng Hiện Không Sẵn Sàng'}
-              </Button>
+              {sourceBasket ? (
+                <div className="space-y-2.5">
+                  <Button
+                    variant="primary"
+                    size="lg"
+                    className="w-full font-bold uppercase tracking-wider shadow-md hover:shadow-lg transition-all"
+                    disabled={room.status !== 'available'}
+                    onClick={handleProceedWithBasket}
+                  >
+                    <span>Tiếp tục đặt trọn Giỏ này ({sourceBasket.totalRooms} phòng) →</span>
+                  </Button>
+
+                  <button
+                    type="button"
+                    onClick={handleProceedSingleRoom}
+                    className="w-full bg-white hover:bg-[#F2ECE1] text-[#3E2C23] border border-[#D0C8BC] py-2.5 px-4 rounded-xl text-xs font-bold transition-colors cursor-pointer"
+                  >
+                    Chỉ đặt riêng phòng này ({totalPrice.toLocaleString('vi-VN')}đ)
+                  </button>
+                </div>
+              ) : (
+                <Button
+                  variant="primary"
+                  size="lg"
+                  className="w-full font-bold uppercase tracking-wider"
+                  disabled={room.status !== 'available'}
+                  onClick={handleProceedSingleRoom}
+                >
+                  {room.status === 'available' ? '🔒 Đặt Phòng & Nhận Mã PIN' : 'Phòng Hiện Không Sẵn Sàng'}
+                </Button>
+              )}
 
               <div className="text-[11px] text-center text-[#8C7A70] space-y-1">
                 <p>⚡ Nhận phòng tự động 24/7 với Smart Lock TTLock</p>

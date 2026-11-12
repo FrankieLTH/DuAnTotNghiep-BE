@@ -24,7 +24,16 @@ import {
   IconEdit,
 } from '../AdminIcons';
 import { AdminUser } from '../AdminLayout';
-import { adminService, adminApi, getSimRooms, getSimRoomTypes, getSimBookings, HOMESTAY_EXTRA_SERVICES } from '../../../services/adminService';
+import {
+  adminService,
+  adminApi,
+  getSimRooms,
+  getSimRoomTypes,
+  getSimBookings,
+  HOMESTAY_EXTRA_SERVICES,
+  DateView,
+  DateSub,
+} from '../../../services/adminService';
 
 // ============================================================
 // TYPES
@@ -119,6 +128,13 @@ export const BookingsScreen: React.FC<BookingsScreenProps> = ({
   const [currentPage, setCurrentPage] = useState(1);
   const pageSize = 10;
 
+  // ---- Date Filter (Hôm nay / Sắp tới) ----
+  const [dateView, setDateView] = useState<DateView>('all');
+  const [dateSub, setDateSub] = useState<string>('all');
+  const [dateFrom, setDateFrom] = useState('');
+  const [dateTo, setDateTo] = useState('');
+  const [dateCounts, setDateCounts] = useState<{ today: number; upcoming: number }>({ today: 0, upcoming: 0 });
+
   // ---- Data ----
   const [loading, setLoading] = useState(false);
   const [bookings, setBookings] = useState<any[]>([]);
@@ -137,9 +153,18 @@ export const BookingsScreen: React.FC<BookingsScreenProps> = ({
   const [selectedBooking, setSelectedBooking] = useState<any | null>(null);
   const [showDetailDrawer, setShowDetailDrawer] = useState(false);
 
-  // ---- Early checkout confirm ----
+  // ---- Early checkout confirm (legacy – replaced by inspection modal) ----
   const [showEarlyCheckoutConfirm, setShowEarlyCheckoutConfirm] = useState(false);
   const [earlyCheckoutTarget, setEarlyCheckoutTarget] = useState<any | null>(null);
+
+  // ---- Inspection modal (kiểm tra phòng trước check-out) ----
+  const [showInspectionModal, setShowInspectionModal] = useState(false);
+  const [inspectionTarget, setInspectionTarget] = useState<any | null>(null);
+  const [inspectionChecks, setInspectionChecks] = useState({ assets: false, minibar: false, keyReturned: false });
+  const [inspectionNote, setInspectionNote] = useState('');
+  const [hasSurcharge, setHasSurcharge] = useState(false);
+  const [inspectionSurcharge, setInspectionSurcharge] = useState('');
+  const [inspectionSubmitting, setInspectionSubmitting] = useState(false);
 
   // ---- Refund confirm ----
   const [showRefundConfirm, setShowRefundConfirm] = useState(false);
@@ -218,6 +243,17 @@ export const BookingsScreen: React.FC<BookingsScreenProps> = ({
     }).catch(() => {});
   }, [currentUser.role]);
 
+  const fetchDateCounts = useCallback(() => {
+    adminService
+      .getDateCounts(selectedBranchId || undefined, currentUser.role)
+      .then((res) => setDateCounts(res))
+      .catch(() => {});
+  }, [selectedBranchId, currentUser.role]);
+
+  useEffect(() => {
+    fetchDateCounts();
+  }, [fetchDateCounts]);
+
   const fetchBookings = useCallback(async () => {
     setLoading(true);
     try {
@@ -226,6 +262,10 @@ export const BookingsScreen: React.FC<BookingsScreenProps> = ({
           tab: activeTab,
           booking_type: filterBookingType !== 'all' ? filterBookingType : undefined,
           search: searchQuery.trim() || undefined,
+          dateView: dateView !== 'all' ? dateView : undefined,
+          dateSub: dateView !== 'all' && dateSub !== 'all' ? (dateSub as any) : undefined,
+          from: dateView === 'upcoming' && dateSub === 'custom' && dateFrom ? dateFrom : undefined,
+          to: dateView === 'upcoming' && dateSub === 'custom' && dateTo ? dateTo : undefined,
           page: currentPage,
           limit: pageSize,
         },
@@ -243,7 +283,17 @@ export const BookingsScreen: React.FC<BookingsScreenProps> = ({
     } finally {
       setLoading(false);
     }
-  }, [activeTab, filterBookingType, searchQuery, currentPage, currentUser.role]);
+  }, [
+    activeTab,
+    filterBookingType,
+    searchQuery,
+    currentPage,
+    currentUser.role,
+    dateView,
+    dateSub,
+    dateFrom,
+    dateTo,
+  ]);
 
   useEffect(() => { fetchBookings(); }, [fetchBookings]);
 
@@ -251,7 +301,7 @@ export const BookingsScreen: React.FC<BookingsScreenProps> = ({
   // ACTIONS
   // ============================================================
 
-  // Check-out sớm
+  // Check-out sớm (legacy fallback)
   const handleEarlyCheckout = async () => {
     if (!earlyCheckoutTarget) return;
     try {
@@ -260,8 +310,32 @@ export const BookingsScreen: React.FC<BookingsScreenProps> = ({
       setShowEarlyCheckoutConfirm(false);
       setEarlyCheckoutTarget(null);
       await fetchBookings();
+      fetchDateCounts();
     } catch (err: any) {
       onShowToast(err?.response?.data?.message || 'Lỗi khi check-out.', 'error');
+    }
+  };
+
+  // Check-out kèm kiểm tra phòng (Room Inspection)
+  const handleConfirmInspectionCheckout = async () => {
+    if (!inspectionTarget) return;
+    if (!inspectionChecks.assets || !inspectionChecks.minibar || !inspectionChecks.keyReturned) {
+      onShowToast('Vui lòng hoàn tất kiểm tra tất cả các hạng mục phòng trước khi check-out!', 'warning');
+      return;
+    }
+    setInspectionSubmitting(true);
+    try {
+      await adminService.checkOutBooking(inspectionTarget.id, currentUser.role);
+      const surchargeNote = hasSurcharge && inspectionSurcharge ? ` (Phụ thu ghi nhận: ${formatMoney(Number(inspectionSurcharge))})` : '';
+      onShowToast(`Đã kiểm tra phòng & check-out thành công cho đơn ${inspectionTarget.booking_code}${surchargeNote}. Phòng chuyển sang Cần dọn dẹp.`, 'success');
+      setShowInspectionModal(false);
+      setInspectionTarget(null);
+      await fetchBookings();
+      fetchDateCounts();
+    } catch (err: any) {
+      onShowToast(err?.response?.data?.message || 'Lỗi khi check-out.', 'error');
+    } finally {
+      setInspectionSubmitting(false);
     }
   };
 
@@ -276,6 +350,7 @@ export const BookingsScreen: React.FC<BookingsScreenProps> = ({
       setRefundTarget(null);
       setRefundReason('');
       await fetchBookings();
+      fetchDateCounts();
     } catch (err: any) {
       onShowToast(err?.response?.data?.message || 'Lỗi khi hoàn tiền.', 'error');
     }
@@ -291,6 +366,7 @@ export const BookingsScreen: React.FC<BookingsScreenProps> = ({
       setCancelPendingTarget(null);
       setCancelPendingReason('');
       await fetchBookings();
+      fetchDateCounts();
     } catch (err: any) {
       onShowToast(err?.response?.data?.message || 'Lỗi khi hủy đơn.', 'error');
     }
@@ -790,21 +866,43 @@ export const BookingsScreen: React.FC<BookingsScreenProps> = ({
         <td className="py-2.5 px-3.5">
           {rooms.length === 0 ? (
             <span className="text-[11px] text-[#78716C]">—</span>
-          ) : rooms.map((r: any, i: number) => (
-            <div key={i} className="text-xs">
-              <span className="font-medium text-[#44403C]">{r.room_type_name}</span>
-              {r.room_number && <span className="ml-1 font-mono text-[#B4532A]">({r.room_number})</span>}
-              {!r.room_id && b.booking_status === 'pending_payment' && (
-                <span className="ml-1 text-[10px] text-[#78716C] italic">chưa gán</span>
+          ) : (
+            <div className="space-y-1">
+              {rooms.length > 1 && (
+                <div className="text-[10px] font-bold text-[#B4532A] bg-[#FAF3F0] px-1.5 py-0.5 rounded inline-block">
+                  Đơn {rooms.length} phòng
+                </div>
               )}
+              {rooms.map((r: any, i: number) => {
+                const isAssigned = !!r.room_id && !!r.room_number;
+                return (
+                  <div key={i} className="text-xs flex items-center gap-1.5 flex-wrap">
+                    <span className="font-medium text-[#44403C]">{r.room_type_name || 'Phòng'}</span>
+                    {r.room_number ? (
+                      <span className="font-mono text-[#B4532A] font-bold">({r.room_number})</span>
+                    ) : (
+                      <span className="text-[10px] bg-[#FEF3C7] text-[#92400E] border border-[#FDE68A] px-1.5 py-0.2 rounded font-semibold">
+                        Chưa gán
+                      </span>
+                    )}
+                    {(r.has_extra_bed || b.has_extra_bed) && (
+                      <span className="text-[10px] bg-[#EDF5F1] text-[#2A694E] px-1.5 py-0.2 rounded font-semibold border border-[#CDE3D5]">
+                        + Nệm phụ
+                      </span>
+                    )}
+                  </div>
+                );
+              })}
             </div>
-          ))}
+          )}
         </td>
 
         {/* Ngày */}
         <td className="py-2.5 px-3.5 text-xs text-[#44403C]">
-          <div>{new Date(b.booked_start_time).toLocaleDateString('vi-VN')}</div>
-          <div className="text-[11px] text-[#78716C]">→ {new Date(b.booked_end_time).toLocaleDateString('vi-VN')}</div>
+          <div>{new Date(b.booked_start_time).toLocaleDateString('vi-VN')} → {new Date(b.booked_end_time).toLocaleDateString('vi-VN')}</div>
+          <div className="text-[11px] text-[#78716C]">
+            {new Date(b.booked_start_time).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })} → {new Date(b.booked_end_time).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })}
+          </div>
         </td>
 
         {/* Tiền */}
@@ -869,15 +967,22 @@ export const BookingsScreen: React.FC<BookingsScreenProps> = ({
               </Button>
             )}
 
-            {/* Tab: Đang lưu trú — Check-out sớm */}
+            {/* Tab: Đang lưu trú — Check-out (Yêu cầu kiểm tra phòng) */}
             {b.booking_status === 'checked_in' && (
               <Button
                 variant="secondary" size="sm"
                 icon={<IconCheck className="w-3.5 h-3.5" />}
-                onClick={() => { setEarlyCheckoutTarget(b); setShowEarlyCheckoutConfirm(true); }}
+                onClick={() => {
+                  setInspectionTarget(b);
+                  setInspectionChecks({ assets: false, minibar: false, keyReturned: false });
+                  setInspectionNote('');
+                  setHasSurcharge(false);
+                  setInspectionSurcharge('');
+                  setShowInspectionModal(true);
+                }}
                 className="!text-[#9C5B14] !bg-[#FDF7EE] !border-[#F7DCB4] hover:!bg-[#FBEFD9]"
               >
-                Check-out sớm
+                Check-out
               </Button>
             )}
 
@@ -994,12 +1099,12 @@ export const BookingsScreen: React.FC<BookingsScreenProps> = ({
           )}
         </div>
         <div>
-          <label className="block text-xs font-medium text-[#44403C] mb-1">Người lớn *</label>
+          <label className="block text-xs font-medium text-[#44403C] mb-1">Người lớn (≥ 15 tuổi) *</label>
           <input type="number" min={1} className="w-full border border-[#E5E0D8] rounded-[6px] px-3 py-2 text-xs bg-white focus:outline-none focus:ring-1 focus:ring-[#B4532A]"
             value={wAdults} onChange={e => setWAdults(Math.max(1, Number(e.target.value)))} />
         </div>
         <div>
-          <label className="block text-xs font-medium text-[#44403C] mb-1">Trẻ em</label>
+          <label className="block text-xs font-medium text-[#44403C] mb-1">Trẻ em (dưới 15 tuổi)</label>
           <input type="number" min={0} className="w-full border border-[#E5E0D8] rounded-[6px] px-3 py-2 text-xs bg-white focus:outline-none focus:ring-1 focus:ring-[#B4532A]"
             value={wChildren} onChange={e => setWChildren(Math.max(0, Number(e.target.value)))} />
         </div>
@@ -1302,6 +1407,129 @@ export const BookingsScreen: React.FC<BookingsScreenProps> = ({
           ))}
         </div>
 
+        {/* Hàng chip lọc ngày: Hôm nay / Sắp tới (kết hợp AND với tab trạng thái) */}
+        <div className="px-3.5 py-2.5 bg-[#FAFAF9] border-b border-[#E5E0D8] space-y-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-xs font-semibold text-[#44403C] mr-1">Lọc ngày:</span>
+
+            {/* Chip Tất cả */}
+            <button
+              type="button"
+              onClick={() => { setDateView('all'); setDateSub('all'); setCurrentPage(1); }}
+              className={`px-3 py-1 rounded-full text-xs font-semibold transition-all cursor-pointer ${
+                dateView === 'all'
+                  ? 'bg-[#B4532A] text-white shadow-xs'
+                  : 'bg-white border border-[#E5E0D8] text-[#78716C] hover:bg-[#F4F2EE] hover:text-[#44403C]'
+              }`}
+            >
+              Tất cả
+            </button>
+
+            {/* Chip Hôm nay */}
+            <button
+              type="button"
+              onClick={() => { setDateView('today'); setDateSub('all'); setCurrentPage(1); }}
+              className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold transition-all cursor-pointer ${
+                dateView === 'today'
+                  ? 'bg-[#B4532A] text-white shadow-xs'
+                  : 'bg-white border border-[#E5E0D8] text-[#78716C] hover:bg-[#F4F2EE] hover:text-[#44403C]'
+              }`}
+            >
+              <span>Hôm nay</span>
+              <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-bold leading-none ${dateView === 'today' ? 'bg-white/25 text-white' : 'bg-[#E5E0D8] text-[#44403C]'}`}>
+                {dateCounts.today}
+              </span>
+            </button>
+
+            {/* Chip Sắp tới */}
+            <button
+              type="button"
+              onClick={() => { setDateView('upcoming'); setDateSub('all'); setCurrentPage(1); }}
+              className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold transition-all cursor-pointer ${
+                dateView === 'upcoming'
+                  ? 'bg-[#B4532A] text-white shadow-xs'
+                  : 'bg-white border border-[#E5E0D8] text-[#78716C] hover:bg-[#F4F2EE] hover:text-[#44403C]'
+              }`}
+            >
+              <span>Sắp tới</span>
+              <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-bold leading-none ${dateView === 'upcoming' ? 'bg-white/25 text-white' : 'bg-[#E5E0D8] text-[#44403C]'}`}>
+                {dateCounts.upcoming}
+              </span>
+            </button>
+          </div>
+
+          {/* Sub-chips cho Hôm nay */}
+          {dateView === 'today' && (
+            <div className="flex flex-wrap items-center gap-1.5 pt-1.5 border-t border-[#EDE8E1]">
+              <span className="text-[11px] text-[#A8A29E] mr-1">Chi tiết hôm nay:</span>
+              {[
+                { id: 'all', label: 'Tất cả' },
+                { id: 'checkin', label: 'Nhận hôm nay' },
+                { id: 'checkout', label: 'Trả hôm nay' },
+                { id: 'staying', label: 'Đang ở' },
+              ].map(sub => (
+                <button
+                  key={sub.id}
+                  type="button"
+                  onClick={() => { setDateSub(sub.id); setCurrentPage(1); }}
+                  className={`px-2.5 py-1 rounded-md text-[11px] font-medium transition-colors cursor-pointer ${
+                    dateSub === sub.id
+                      ? 'bg-[#241C18] text-white font-semibold'
+                      : 'bg-white border border-[#E5E0D8] text-[#78716C] hover:bg-[#F4F2EE]'
+                  }`}
+                >
+                  {sub.label}
+                </button>
+              ))}
+            </div>
+          )}
+
+          {/* Sub-chips cho Sắp tới */}
+          {dateView === 'upcoming' && (
+            <div className="flex flex-wrap items-center gap-1.5 pt-1.5 border-t border-[#EDE8E1]">
+              <span className="text-[11px] text-[#A8A29E] mr-1">Mốc thời gian:</span>
+              {[
+                { id: 'all', label: 'Tất cả sắp tới' },
+                { id: 'tomorrow', label: 'Ngày mai' },
+                { id: '7days', label: '7 ngày tới' },
+                { id: '30days', label: '30 ngày tới' },
+                { id: 'custom', label: 'Chọn khoảng ngày' },
+              ].map(sub => (
+                <button
+                  key={sub.id}
+                  type="button"
+                  onClick={() => { setDateSub(sub.id); setCurrentPage(1); }}
+                  className={`px-2.5 py-1 rounded-md text-[11px] font-medium transition-colors cursor-pointer ${
+                    dateSub === sub.id
+                      ? 'bg-[#241C18] text-white font-semibold'
+                      : 'bg-white border border-[#E5E0D8] text-[#78716C] hover:bg-[#F4F2EE]'
+                  }`}
+                >
+                  {sub.label}
+                </button>
+              ))}
+
+              {dateSub === 'custom' && (
+                <div className="flex items-center gap-1.5 ml-2">
+                  <input
+                    type="date"
+                    value={dateFrom}
+                    onChange={e => { setDateFrom(e.target.value); setCurrentPage(1); }}
+                    className="border border-[#E5E0D8] rounded px-2 py-0.5 text-[11px] bg-white focus:outline-none focus:ring-1 focus:ring-[#B4532A]"
+                  />
+                  <span className="text-xs text-[#78716C]">→</span>
+                  <input
+                    type="date"
+                    value={dateTo}
+                    onChange={e => { setDateTo(e.target.value); setCurrentPage(1); }}
+                    className="border border-[#E5E0D8] rounded px-2 py-0.5 text-[11px] bg-white focus:outline-none focus:ring-1 focus:ring-[#B4532A]"
+                  />
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+
         {/* Bộ lọc */}
         <div className="flex flex-wrap items-center gap-2 p-3 bg-[#FAFAF9]">
           <div className="relative flex-1 min-w-[200px]">
@@ -1346,7 +1574,27 @@ export const BookingsScreen: React.FC<BookingsScreenProps> = ({
               <tr><td colSpan={7} className="py-10 text-center text-xs text-[#78716C]">Đang tải...</td></tr>
             ) : bookings.length === 0 ? (
               <tr><td colSpan={7} className="py-10 text-center text-xs text-[#78716C]">Không có đơn nào trong mục này.</td></tr>
-            ) : bookings.map(renderBookingRow)}
+            ) : (
+              bookings.map((b: any, idx: number) => {
+                const prev = idx > 0 ? bookings[idx - 1] : null;
+                const bDateStr = new Date(b.booked_start_time).toLocaleDateString('vi-VN', { weekday: 'long', day: '2-digit', month: '2-digit' });
+                const prevDateStr = prev ? new Date(prev.booked_start_time).toLocaleDateString('vi-VN', { weekday: 'long', day: '2-digit', month: '2-digit' }) : null;
+                const showDateHeader = dateView === 'upcoming' && bDateStr !== prevDateStr;
+
+                return (
+                  <React.Fragment key={b.id}>
+                    {showDateHeader && (
+                      <tr className="bg-[#F5F2EB] border-y border-[#E5E0D8]">
+                        <td colSpan={7} className="py-1.5 px-3.5 text-[11px] font-bold text-[#78716C] uppercase tracking-wider">
+                          📅 {bDateStr}
+                        </td>
+                      </tr>
+                    )}
+                    {renderBookingRow(b)}
+                  </React.Fragment>
+                );
+              })
+            )}
           </tbody>
         </TableContainer>
 
@@ -1482,6 +1730,165 @@ export const BookingsScreen: React.FC<BookingsScreenProps> = ({
         {wizardStep === 2 && renderWizardStep2()}
         {wizardStep === 3 && renderWizardStep3()}
         {wizardStep === 4 && renderWizardResult()}
+      </Modal>
+
+      {/* ===== MODAL KIỂM TRA PHÒNG TRƯỚC CHECK-OUT ===== */}
+      <Modal
+        isOpen={showInspectionModal}
+        onClose={() => { if (!inspectionSubmitting) { setShowInspectionModal(false); setInspectionTarget(null); } }}
+        title="Biên bản kiểm tra phòng trước Check-out"
+        maxWidth="lg"
+        footer={
+          <div className="flex items-center justify-between w-full">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setInspectionChecks({ assets: true, minibar: true, keyReturned: true })}
+              disabled={inspectionSubmitting || (inspectionChecks.assets && inspectionChecks.minibar && inspectionChecks.keyReturned)}
+            >
+              ✓ Đánh dấu tất cả đạt
+            </Button>
+            <div className="flex gap-2">
+              <Button
+                variant="secondary"
+                size="md"
+                onClick={() => { setShowInspectionModal(false); setInspectionTarget(null); }}
+                disabled={inspectionSubmitting}
+              >
+                Hủy
+              </Button>
+              <Button
+                variant="primary"
+                size="md"
+                disabled={inspectionSubmitting || !inspectionChecks.assets || !inspectionChecks.minibar || !inspectionChecks.keyReturned}
+                onClick={handleConfirmInspectionCheckout}
+              >
+                {inspectionSubmitting ? 'Đang xử lý...' : 'Xác nhận Check-out'}
+              </Button>
+            </div>
+          </div>
+        }
+      >
+        {inspectionTarget && (
+          <div className="space-y-4 text-xs">
+            {/* Tóm tắt thông tin đơn và phòng */}
+            <div className="p-3 bg-[#FAF8F5] border border-[#E5E0D8] rounded-[8px] flex items-center justify-between">
+              <div>
+                <div className="text-[11px] text-[#78716C]">Mã đặt phòng</div>
+                <div className="font-mono font-bold text-sm text-[#B4532A]">{inspectionTarget.booking_code}</div>
+                <div className="text-[#44403C] mt-0.5">
+                  Khách hàng: <span className="font-medium">{inspectionTarget.customer_name || 'Khách vãng lai'}</span>
+                  {inspectionTarget.customer_phone && <span className="text-[#78716C] ml-1">({inspectionTarget.customer_phone})</span>}
+                </div>
+              </div>
+              <div className="text-right">
+                <div className="text-[11px] text-[#78716C]">Phòng lưu trú</div>
+                <div className="font-bold text-[#1C1917]">
+                  {inspectionTarget.rooms?.map((r: any) => r.room_number || r.room_type_name).join(', ') || 'Chưa gán số phòng'}
+                </div>
+                <Badge variant="info" size="sm">Đang lưu trú</Badge>
+              </div>
+            </div>
+
+            {/* Checklist kiểm tra phòng bắt buộc */}
+            <div>
+              <div className="font-semibold text-[#1C1917] mb-2 flex items-center gap-1.5">
+                <span className="text-[#B4532A] font-bold">●</span>
+                <span>Hạng mục kiểm tra phòng bắt buộc:</span>
+              </div>
+              <div className="space-y-2.5 bg-white border border-[#E5E0D8] rounded-[8px] p-3.5">
+                <label className="flex items-start gap-2.5 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    className="mt-0.5 w-4 h-4 text-[#B4532A] rounded border-[#D6D0C7] focus:ring-[#B4532A]"
+                    checked={inspectionChecks.assets}
+                    onChange={(e) => setInspectionChecks(prev => ({ ...prev, assets: e.target.checked }))}
+                  />
+                  <div>
+                    <div className="font-medium text-[#1C1917]">1. Kiểm tra tài sản & trang thiết bị</div>
+                    <div className="text-[11px] text-[#78716C]">TV, máy lạnh, máy sấy, khăn tắm, chăn ga, nội thất còn nguyên vẹn, không hư hỏng hoặc mất mát.</div>
+                  </div>
+                </label>
+
+                <div className="border-t border-[#F4F2EE]" />
+
+                <label className="flex items-start gap-2.5 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    className="mt-0.5 w-4 h-4 text-[#B4532A] rounded border-[#D6D0C7] focus:ring-[#B4532A]"
+                    checked={inspectionChecks.minibar}
+                    onChange={(e) => setInspectionChecks(prev => ({ ...prev, minibar: e.target.checked }))}
+                  />
+                  <div>
+                    <div className="font-medium text-[#1C1917]">2. Kiểm tra Minibar & đồ tiêu hao</div>
+                    <div className="text-[11px] text-[#78716C]">Kiểm tra số lượng nước khoáng, bánh snack, đồ uống minibar khách đã sử dụng trong phòng.</div>
+                  </div>
+                </label>
+
+                <div className="border-t border-[#F4F2EE]" />
+
+                <label className="flex items-start gap-2.5 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    className="mt-0.5 w-4 h-4 text-[#B4532A] rounded border-[#D6D0C7] focus:ring-[#B4532A]"
+                    checked={inspectionChecks.keyReturned}
+                    onChange={(e) => setInspectionChecks(prev => ({ ...prev, keyReturned: e.target.checked }))}
+                  />
+                  <div>
+                    <div className="font-medium text-[#1C1917]">3. Thu hồi chìa khóa / Thẻ từ / Smart PIN</div>
+                    <div className="text-[11px] text-[#78716C]">Đã nhận lại chìa khóa cơ, thẻ từ hoặc đã vô hiệu hóa mã Smart PIN mở cửa phòng.</div>
+                  </div>
+                </label>
+              </div>
+            </div>
+
+            {/* Phụ thu / Chi phí phát sinh (nếu có) */}
+            <div className="p-3 bg-[#FAF8F5] border border-[#E5E0D8] rounded-[8px] space-y-2.5">
+              <label className="flex items-center gap-2 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  className="w-4 h-4 text-[#B4532A] rounded border-[#D6D0C7] focus:ring-[#B4532A]"
+                  checked={hasSurcharge}
+                  onChange={(e) => setHasSurcharge(e.target.checked)}
+                />
+                <span className="font-medium text-[#1C1917]">Có phụ thu / phát sinh chi phí hư hỏng, minibar?</span>
+              </label>
+
+              {hasSurcharge && (
+                <div className="space-y-2 pt-1">
+                  <div>
+                    <label className="block text-[11px] font-medium text-[#44403C] mb-1">Số tiền phụ thu (VNĐ) *</label>
+                    <input
+                      type="number"
+                      placeholder="VD: 50000"
+                      value={inspectionSurcharge}
+                      onChange={(e) => setInspectionSurcharge(e.target.value)}
+                      className="w-full border border-[#E5E0D8] rounded-[6px] px-3 py-1.5 text-xs text-[#1C1917] bg-white focus:outline-none focus:ring-1 focus:ring-[#B4532A]"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-medium text-[#44403C] mb-1">Lý do phụ thu / Ghi chú kiểm phòng</label>
+                    <input
+                      type="text"
+                      placeholder="VD: 2 chai nước suối, vỡ ly thủy tinh..."
+                      value={inspectionNote}
+                      onChange={(e) => setInspectionNote(e.target.value)}
+                      className="w-full border border-[#E5E0D8] rounded-[6px] px-3 py-1.5 text-xs text-[#1C1917] bg-white focus:outline-none focus:ring-1 focus:ring-[#B4532A]"
+                    />
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Cảnh báo khi chưa tích đủ */}
+            {(!inspectionChecks.assets || !inspectionChecks.minibar || !inspectionChecks.keyReturned) && (
+              <div className="p-2.5 bg-[#FFFBEB] border border-[#FDE68A] text-[#92400E] rounded-[6px] text-[11px] flex items-center gap-2">
+                <IconAlertTriangle className="w-4 h-4 flex-shrink-0" />
+                <span>Nhân viên buồng phòng / lễ tân bắt buộc tích xác nhận cả 3 hạng mục trên để mở khóa nút check-out.</span>
+              </div>
+            )}
+          </div>
+        )}
       </Modal>
 
       {/* ===== CONFIRM: CHECK-OUT SỚM ===== */}

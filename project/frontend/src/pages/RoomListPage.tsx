@@ -1,5 +1,6 @@
-﻿import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import { SearchBookingBar } from '../components/home/SearchBookingBar';
+import { RecommendationSection } from '../components/room-list/RecommendationSection';
 import {
   getRooms,
   getApartments,
@@ -8,6 +9,7 @@ import {
   SearchParams,
   BookingDraft,
   BookingGuestSlot,
+  Recommendation,
 } from '../services/dataService';
 
 interface RoomListPageProps {
@@ -366,6 +368,113 @@ export const RoomListPage: React.FC<RoomListPageProps> = ({
     }
   };
 
+  // Xử lý khi khách chọn 1 phương án gợi ý phòng tối ưu
+  const handleSelectRecommendation = (rec: Recommendation) => {
+    if (!rec.items || rec.items.length === 0) return;
+    const firstItem = rec.items[0];
+
+    const slots: BookingGuestSlot[] = [
+      {
+        id: 'slot-1',
+        slot_index: 1,
+        guest_type: 'adult',
+        is_booker: true,
+        is_foreigner: false,
+        full_name: '',
+        date_of_birth: '',
+        id_type: 'cccd',
+        id_number: '',
+        slot_status: 'empty',
+        retry_count: 0,
+      },
+    ];
+
+    for (let i = 2; i <= currentFilter.adults; i++) {
+      slots.push({
+        id: `slot-${i}`,
+        slot_index: i,
+        guest_type: 'adult',
+        is_booker: false,
+        is_foreigner: false,
+        full_name: '',
+        date_of_birth: '',
+        id_type: 'cccd',
+        id_number: '',
+        slot_status: 'empty',
+        retry_count: 0,
+      });
+    }
+
+    for (let c = 1; c <= (currentFilter.children || 0); c++) {
+      const childAge = currentFilter.childrenAges?.[c - 1] ?? 5;
+      slots.push({
+        id: `slot-child-${c}`,
+        slot_index: currentFilter.adults + c,
+        guest_type: 'child',
+        is_booker: false,
+        is_foreigner: false,
+        full_name: '',
+        date_of_birth: '',
+        age: childAge,
+        id_type: 'cccd',
+        id_number: '',
+        slot_status: 'empty',
+        retry_count: 0,
+      });
+    }
+
+    const calcNights = Math.max(
+      1,
+      Math.ceil((new Date(currentFilter.checkOut).getTime() - new Date(currentFilter.checkIn).getTime()) / 86400000)
+    );
+
+    const draft: BookingDraft = {
+      id: `draft_${Date.now()}`,
+      booking_code: `BK-2026-${Math.floor(1000 + Math.random() * 9000)}`,
+      apartment_id: currentFilter.branchId || 1,
+      apartment_name: `Đồi Bông Gòn (${firstItem.name})`,
+      apartment_address: 'Đường Hải Đăng, Phường 2, TP. Vũng Tàu',
+      room_type_id: firstItem.roomTypeId,
+      room_type_name: firstItem.name || 'Phòng nghỉ',
+      room_type_image: firstItem.image || '',
+      num_rooms: rec.items.reduce((s, it) => s + it.quantity, 0),
+      check_in_date: currentFilter.checkIn,
+      check_out_date: currentFilter.checkOut,
+      nights: calcNights,
+      num_adults: currentFilter.adults,
+      num_children: currentFilter.children,
+      children_ages: currentFilter.childrenAges,
+      price_breakdown: [
+        {
+          date: currentFilter.checkIn,
+          dayOfWeek: 'Hôm nay',
+          basePrice: Math.round(rec.totalPrice / calcNights),
+          extraFeePercent: 0,
+          extraFeeAmount: 0,
+          finalPricePerRoom: Math.round(rec.totalPrice / calcNights),
+        },
+      ],
+      room_subtotal: rec.totalPrice,
+      extra_fee_total: 0,
+      service_total: 0,
+      discount_amount: 0,
+      total_price: rec.totalPrice,
+      hold_expires_at: Date.now() + 30 * 60 * 1000,
+      status: 'pending_info',
+      booker: {
+        full_name: '',
+        email: '',
+        phone: '',
+        is_staying: true,
+        email_verified: false,
+        consent_data_protection: false,
+      },
+      guests: slots,
+    };
+
+    onSelectRoomType(draft);
+  };
+
   return (
     <div className="bg-[#FAF6F0] min-h-screen pb-20 font-sans text-[#241C18]">
       {/* 1. Breadcrumb & Tiêu Đề Đầu Trang */}
@@ -461,6 +570,20 @@ export const RoomListPage: React.FC<RoomListPageProps> = ({
           })}
         </div>
       </div>
+
+      {/* KHỐI GỢI Ý PHÒNG TỐI ƯU THEO TIÊU CHÍ ĐẶT */}
+      <RecommendationSection
+        criteria={{
+          apartmentId: currentFilter.branchId || undefined,
+          checkIn: currentFilter.checkIn,
+          checkOut: currentFilter.checkOut,
+          stayType: (currentFilter.stayType as any) || 'extended',
+          adults: currentFilter.adults,
+          children: currentFilter.children,
+          rooms: currentFilter.rooms || 1,
+        }}
+        onSelectRecommendation={handleSelectRecommendation}
+      />
 
       {/* 4. Section Tiêu Đề Danh Sách */}
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 mb-8">
@@ -709,7 +832,6 @@ export const RoomListPage: React.FC<RoomListPageProps> = ({
     </div>
   );
 };
-
 
 
 

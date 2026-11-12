@@ -593,6 +593,8 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({
           apartment_name: draft.apartment_name,
           room_type_id: draft.room_type_id,
           room_type_name: draft.room_type_name,
+          num_rooms: draft.num_rooms || 1,
+          booking_rooms: draft.booking_rooms,
           check_in_date: draft.check_in_date,
           check_out_date: draft.check_out_date,
           total_price: finalTotalAmount,
@@ -1009,8 +1011,8 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({
                     <p className="text-xs text-[#736B63] mt-1 font-medium">
                       Đoàn của bạn:{' '}
                       <span className="text-[#1A1615] font-bold">
-                        {draft.num_adults} người lớn
-                        {draft.num_children > 0 ? `, ${draft.num_children} trẻ em (< 10 tuổi)` : ''}
+                        {draft.num_adults} người lớn (≥ 15 tuổi)
+                        {draft.num_children > 0 ? `, ${draft.num_children} trẻ em (< 15 tuổi)` : ''}
                       </span>{' '}
                       ({slots.length} thành viên)
                     </p>
@@ -1581,6 +1583,11 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({
                         </h4>
                         <span className="text-[11px] text-[#736B63] block">
                           {br.count} phòng • Sức chứa {br.max_occupancy} khách
+                          {br.has_extra_bed && (
+                            <span className="ml-1.5 text-[10px] bg-[#FEF3C7] text-[#92400E] px-1.5 py-0.2 rounded font-semibold border border-[#FDE68A]">
+                              + Nệm phụ
+                            </span>
+                          )}
                         </span>
                         <span className="text-[11px] text-[#9E472A] font-semibold block">
                           {(br.price * br.count * draft.nights).toLocaleString('vi-VN')}đ
@@ -1634,6 +1641,13 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({
                     <span>{(item.finalPricePerRoom * draft.num_rooms).toLocaleString('vi-VN')}đ</span>
                   </div>
                 ))}
+
+                {draft.extra_bed_fee && draft.extra_bed_fee > 0 ? (
+                  <div className="flex justify-between text-[#9E472A] font-semibold">
+                    <span>🛏️ Phụ phí nệm phụ:</span>
+                    <span>+{draft.extra_bed_fee.toLocaleString('vi-VN')}đ</span>
+                  </div>
+                ) : null}
 
                 {appliedVoucher && (
                   <div className="flex justify-between text-[#9E472A] font-semibold">

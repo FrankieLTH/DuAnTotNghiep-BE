@@ -24,7 +24,7 @@ import { AdminLockPinService } from './admin-lock-pin.service';
 import { AdminCatalogStaffService } from './admin-catalog-staff.service';
 import { AuditLogService } from './audit-log.service';
 import { AdminBranchService, CreateBranchDto, UpdateBranchDto } from './admin-branch.service';
-import { AdminRoomService, CreateRoomTypeDto, UpdateRoomTypeDto, CreateRoomDto, UpdateRoomDto } from './admin-room.service';
+import { AdminRoomService, CreateRoomTypeDto, UpdateRoomTypeDto, CreateRoomDto, UpdateRoomDto, BatchCreateRoomsDto } from './admin-room.service';
 
 @Controller('admin')
 @UseGuards(PermissionsGuard)
@@ -193,6 +193,15 @@ export class AdminController {
     return this.roomService.createRoom(dto, staff.actor);
   }
 
+  @Post('rooms/batch')
+  @RequirePermissions(Permission.ROOMS_MANAGE)
+  async batchCreateRooms(
+    @Body() dto: BatchCreateRoomsDto,
+    @CurrentStaff() staff: StaffContext,
+  ) {
+    return this.roomService.batchCreateRooms(dto, staff.actor);
+  }
+
   @Put('rooms/:id')
   @RequirePermissions(Permission.ROOMS_MANAGE)
   async updateRoom(
@@ -245,6 +254,12 @@ export class AdminController {
   // ============================================================
   // 4. QUẢN LÝ ĐƠN ĐẶT PHÒNG (BOOKINGS MANAGEMENT)
   // ============================================================
+  @Get('bookings/date-counts')
+  @RequirePermissions(Permission.BOOKINGS_VIEW)
+  async getDateCounts(@Query('apartment_id') apartmentId?: number) {
+    return this.bookingService.getDateCounts(apartmentId ? Number(apartmentId) : undefined);
+  }
+
   @Get('bookings')
   @RequirePermissions(Permission.BOOKINGS_VIEW)
   async getBookings(
@@ -262,6 +277,10 @@ export class AdminController {
     @Query('limit') limit?: number,
     @Query('sort_by') sortBy?: string,
     @Query('sort_order') sortOrder?: 'ASC' | 'DESC',
+    @Query('dateView') dateView?: 'all' | 'today' | 'upcoming',
+    @Query('dateSub') dateSub?: any,
+    @Query('from') from?: string,
+    @Query('to') to?: string,
     @CurrentStaff() staff?: StaffContext,
   ) {
     const staffInfo = {
@@ -287,6 +306,10 @@ export class AdminController {
         limit: limit ? Number(limit) : 15,
         sort_by: sortBy,
         sort_order: sortOrder,
+        dateView,
+        dateSub,
+        from,
+        to,
       },
       staffInfo
     );

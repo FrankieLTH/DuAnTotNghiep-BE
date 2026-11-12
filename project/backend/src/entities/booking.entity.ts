@@ -144,6 +144,13 @@ export class Booking {
   room: Room;
 
   @Column({ nullable: true })
+  room_type_id: number;
+
+  @ManyToOne(() => RoomType, { nullable: true })
+  @JoinColumn({ name: 'room_type_id' })
+  room_type: RoomType;
+
+  @Column({ nullable: true })
   voucher_id: number;
 
   @ManyToOne(() => Voucher, { nullable: true })
@@ -168,11 +175,20 @@ export class Booking {
   @Column({ type: 'enum', enum: BookingType, default: BookingType.OVERNIGHT })
   booking_type: BookingType;
 
+  @Column({ nullable: true })
+  stay_type: string;
+
   @Column({ type: 'datetime' })
   booked_start_time: Date;
 
+  @Column({ type: 'datetime', nullable: true })
+  start_at: Date;
+
   @Column({ type: 'datetime' })
   booked_end_time: Date;
+
+  @Column({ type: 'datetime', nullable: true })
+  end_at: Date;
 
   @Column({ type: 'datetime', nullable: true })
   check_in_actual: Date;
@@ -356,6 +372,15 @@ export class BookingRoom {
   @ManyToOne(() => Room, { nullable: true })
   @JoinColumn({ name: 'room_id' })
   room: Room;
+
+  @Column({ default: 1 })
+  adults: number;
+
+  @Column({ default: 0 })
+  children: number;
+
+  @Column('decimal', { precision: 12, scale: 2, default: 0 })
+  unit_price: number;
 
   @CreateDateColumn()
   created_at: Date;

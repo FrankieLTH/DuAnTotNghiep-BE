@@ -162,6 +162,14 @@ export interface IBookingGuest {
   updated_at?: string;
 }
 
+export interface IStayTypeConfig {
+  stay_type: 'overnight' | 'daytime' | 'fullday' | string;
+  name: string;
+  start_time: string;
+  end_time: string;
+  price_factor: number;
+}
+
 export interface IBookingRoom {
   id: number;
   bookings_id: number;
@@ -169,6 +177,9 @@ export interface IBookingRoom {
   room_types_name?: string;
   room_id?: number | null;
   room_number?: string | null;
+  adults?: number;
+  children?: number;
+  unit_price?: number;
 }
 
 export interface ITransaction {
@@ -214,9 +225,12 @@ export interface IBooking {
   children: number;
   is_booked_for_other: boolean;
   lock_email?: string | null;
-  booking_type: BookingType | 'overnight' | 'daily';
+  booking_type: BookingType | 'overnight' | 'daily' | 'extended' | 'daytime' | 'fullday';
+  stay_type?: 'overnight' | 'daytime' | 'fullday' | string;
   booked_start_time: string;
+  start_at?: string;
   booked_end_time: string;
+  end_at?: string;
   check_in_actual?: string | null;
   check_out_actual?: string | null;
   booking_status: BookingStatus | 'draft' | 'pending_payment' | 'confirmed' | 'checked_in' | 'checked_out' | 'expired' | 'cancelled';

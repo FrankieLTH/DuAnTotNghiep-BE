@@ -31,6 +31,7 @@ import {
   EXTENDED_HOLD_MINUTES,
   SIGNED_DOC_URL_TTL_SECONDS,
   REALTIME_EVENTS,
+  getVietnamDateString,
 } from '@shared/index';
 import { AuditLogService } from './audit-log.service';
 import { AutoRoomAssignmentService } from './auto-room-assignment.service';
@@ -52,6 +53,10 @@ export interface BookingFilterDto {
   limit?: number;
   sort_by?: string;
   sort_order?: 'ASC' | 'DESC';
+  dateView?: 'all' | 'today' | 'upcoming';
+  dateSub?: 'all' | 'checkin' | 'checkout' | 'staying' | 'tomorrow' | '7days' | '30days' | 'custom';
+  from?: string;
+  to?: string;
 }
 
 export interface CurrentStaff {
@@ -64,6 +69,7 @@ export interface CurrentStaff {
 @Injectable()
 export class AdminBookingService {
   private readonly logger = new Logger(AdminBookingService.name);
+  private dateCountsCache = new Map<string, { counts: { today: number; upcoming: number }; expiresAt: number }>();
 
   constructor(
     private readonly dataSource: DataSource,
@@ -176,9 +182,60 @@ export class AdminBookingService {
       params.push(searchPattern, searchPattern, searchPattern, searchPattern, searchPattern);
     }
 
+    // B3: Date View & Sub Filter ("Hôm nay / Sắp tới")
+    if (filters.dateView === 'today') {
+      const todayVN = getVietnamDateString();
+      if (filters.dateSub === 'checkin') {
+        whereClause += ` AND DATE(CONVERT_TZ(b.booked_start_time, '+00:00', '+07:00')) = ?`;
+        params.push(todayVN);
+      } else if (filters.dateSub === 'checkout') {
+        whereClause += ` AND DATE(CONVERT_TZ(b.booked_end_time, '+00:00', '+07:00')) = ?`;
+        params.push(todayVN);
+      } else if (filters.dateSub === 'staying') {
+        whereClause += ` AND (b.booking_status = 'checked_in' OR (DATE(CONVERT_TZ(b.booked_start_time, '+00:00', '+07:00')) <= ? AND DATE(CONVERT_TZ(b.booked_end_time, '+00:00', '+07:00')) >= ?))`;
+        params.push(todayVN, todayVN);
+      } else {
+        whereClause += ` AND (DATE(CONVERT_TZ(b.booked_start_time, '+00:00', '+07:00')) = ? OR DATE(CONVERT_TZ(b.booked_end_time, '+00:00', '+07:00')) = ? OR b.booking_status = 'checked_in' OR (DATE(CONVERT_TZ(b.booked_start_time, '+00:00', '+07:00')) <= ? AND DATE(CONVERT_TZ(b.booked_end_time, '+00:00', '+07:00')) >= ?))`;
+        params.push(todayVN, todayVN, todayVN, todayVN);
+      }
+    } else if (filters.dateView === 'upcoming') {
+      const todayVN = getVietnamDateString();
+      const tomorrowVN = getVietnamDateString(new Date(Date.now() + 86400000));
+      if (filters.dateSub === 'tomorrow') {
+        whereClause += ` AND DATE(CONVERT_TZ(b.booked_start_time, '+00:00', '+07:00')) = ?`;
+        params.push(tomorrowVN);
+      } else if (filters.dateSub === '7days') {
+        const in7DaysVN = getVietnamDateString(new Date(Date.now() + 7 * 86400000));
+        whereClause += ` AND DATE(CONVERT_TZ(b.booked_start_time, '+00:00', '+07:00')) >= ? AND DATE(CONVERT_TZ(b.booked_start_time, '+00:00', '+07:00')) <= ?`;
+        params.push(tomorrowVN, in7DaysVN);
+      } else if (filters.dateSub === '30days') {
+        const in30DaysVN = getVietnamDateString(new Date(Date.now() + 30 * 86400000));
+        whereClause += ` AND DATE(CONVERT_TZ(b.booked_start_time, '+00:00', '+07:00')) >= ? AND DATE(CONVERT_TZ(b.booked_start_time, '+00:00', '+07:00')) <= ?`;
+        params.push(tomorrowVN, in30DaysVN);
+      } else if (filters.dateSub === 'custom') {
+        if (filters.from) {
+          whereClause += ` AND DATE(CONVERT_TZ(b.booked_start_time, '+00:00', '+07:00')) >= ?`;
+          params.push(getVietnamDateString(filters.from));
+        }
+        if (filters.to) {
+          whereClause += ` AND DATE(CONVERT_TZ(b.booked_start_time, '+00:00', '+07:00')) <= ?`;
+          params.push(getVietnamDateString(filters.to));
+        }
+      } else {
+        whereClause += ` AND DATE(CONVERT_TZ(b.booked_start_time, '+00:00', '+07:00')) > ?`;
+        params.push(todayVN);
+      }
+    }
+
     // Sắp xếp
-    const sortBy = filters.sort_by === 'booked_start_time' ? 'b.booked_start_time' : 'b.created_at';
-    const sortOrder = filters.sort_order === 'ASC' ? 'ASC' : 'DESC';
+    let sortBy = filters.sort_by === 'booked_start_time' ? 'b.booked_start_time' : 'b.created_at';
+    let sortOrder = filters.sort_order === 'ASC' ? 'ASC' : 'DESC';
+
+    // B2: Sắp xếp mặc định khi chọn filter ngày: theo booked_start_time tăng dần (sắp tới gần nhất xếp trên)
+    if (filters.dateView && filters.dateView !== 'all' && !filters.sort_by) {
+      sortBy = 'b.booked_start_time';
+      sortOrder = 'ASC';
+    }
 
     // Đếm tổng số bản ghi
     const countQuery = `
@@ -277,6 +334,56 @@ export class AdminBookingService {
       total_pages: Math.ceil(total / limit),
       items: rawBookings,
     };
+  }
+
+  /**
+   * Đếm số đơn cho badge "Hôm nay · n" và "Sắp tới · n" (Cache 15-30s, timezone Asia/Ho_Chi_Minh)
+   */
+  async getDateCounts(apartmentId?: number): Promise<{ today: number; upcoming: number }> {
+    const key = apartmentId ? String(apartmentId) : 'all';
+    const now = Date.now();
+    const cached = this.dateCountsCache.get(key);
+    if (cached && cached.expiresAt > now) {
+      return cached.counts;
+    }
+
+    const todayVN = getVietnamDateString();
+    let aptFilter = '';
+    const params: any[] = [];
+    if (apartmentId && Number(apartmentId) > 0) {
+      aptFilter = 'AND b.apartment_id = ?';
+      params.push(Number(apartmentId));
+    }
+
+    const sql = `
+      SELECT
+        COUNT(DISTINCT CASE
+          WHEN b.booking_status NOT IN ('cancelled', 'expired')
+            AND (
+              DATE(CONVERT_TZ(b.booked_start_time, '+00:00', '+07:00')) = '${todayVN}'
+              OR DATE(CONVERT_TZ(b.booked_end_time, '+00:00', '+07:00')) = '${todayVN}'
+              OR b.booking_status = 'checked_in'
+              OR (
+                DATE(CONVERT_TZ(b.booked_start_time, '+00:00', '+07:00')) <= '${todayVN}'
+                AND DATE(CONVERT_TZ(b.booked_end_time, '+00:00', '+07:00')) >= '${todayVN}'
+              )
+            ) THEN b.id END) AS today_count,
+        COUNT(DISTINCT CASE
+          WHEN b.booking_status NOT IN ('cancelled', 'expired')
+            AND DATE(CONVERT_TZ(b.booked_start_time, '+00:00', '+07:00')) > '${todayVN}'
+            THEN b.id END) AS upcoming_count
+      FROM BOOKINGS b
+      WHERE 1=1 ${aptFilter}
+    `;
+
+    const rows = await this.dataSource.query(sql, params);
+    const counts = {
+      today: Number(rows[0]?.today_count || 0),
+      upcoming: Number(rows[0]?.upcoming_count || 0),
+    };
+
+    this.dateCountsCache.set(key, { counts, expiresAt: now + 20000 }); // cache 20s
+    return counts;
   }
 
   /**

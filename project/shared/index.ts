@@ -2,3 +2,34 @@ export * from './enums';
 export * from './constants';
 export * from './helpers';
 export * from './interfaces';
+export * from './recommendation';
+export * from './date-filters';
+export * from './helpers/roomSuggestion';
+export * from './helpers/roomNumbering';
+export {
+  calculateRoomPrice,
+  calculateNights,
+  calculateVoucherDiscount,
+} from './helpers/pricing';
+export type { VoucherRule } from './helpers/pricing';
+
+export {
+  DEFAULT_BASKET_CONFIG,
+  generateCombos,
+  distributeGuests as distributeBasketGuests,
+  buildReasons as buildBasketReasons,
+  buildBaskets,
+  fallbackBaskets,
+} from './helpers/baskets';
+export type {
+  Basket,
+  BasketItem,
+  BasketGuestSlot,
+  BasketConfig,
+  BookingRoomItem,
+  BookingItem,
+} from './helpers/baskets';
+
+
+
+

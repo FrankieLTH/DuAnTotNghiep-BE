@@ -1,4 +1,13 @@
 import api from './api';
+import {
+  matchesDateFilter,
+  computeDateCounts,
+  DateView,
+  DateSub,
+  getVietnamDateString,
+} from '@shared/index';
+
+export type { DateView, DateSub };
 
 export type StaffRole = 'admin' | 'manager';
 
@@ -219,6 +228,7 @@ export interface RoomItem {
   battery_level?: number;
   last_sync_at?: string;
   is_ready_for_booking: boolean;
+  special_features?: string;
 }
 
 export interface LockItem {
@@ -226,6 +236,18 @@ export interface LockItem {
   lock_name: string;
   lock_status?: string;
   battery_level?: number;
+}
+
+export interface BatchCreateRoomItem {
+  room_number: string;
+  special_features?: string;
+  status?: 'available' | 'maintenance';
+}
+
+export interface BatchCreateRoomsPayload {
+  apartment_id: number;
+  room_type_id: number;
+  rooms: BatchCreateRoomItem[];
 }
 
 // ============================================================
@@ -374,6 +396,7 @@ const defaultAdminRooms: RoomItem[] = [
     lock_status: 'online',
     battery_level: 85,
     is_ready_for_booking: true,
+    special_features: 'Ban công ngắm hoàng hôn 270°, bồn sục Jacuzzi ngoài trời',
   },
   {
     room_id: 2,
@@ -964,16 +987,32 @@ export const adminApi = {
         paid_amount: bookingDraft.status === 'confirmed' ? (bookingDraft.total_price || 1200000) : 0,
         deposit_amount: bookingDraft.deposit_amount || Math.round((bookingDraft.total_price || 1200000) * 0.7),
         source: 'online',
-        rooms: [
-          {
-            booking_room_id: newId * 10 + 1,
-            room_types_id: bookingDraft.room_type_id || 1,
-            room_id: bookingDraft.room_id || 1,
-            room_type_name: bookingDraft.room_type_name || 'Phòng Homestay',
-            room_number: bookingDraft.room_number || 'P101',
-            base_price: bookingDraft.base_price || 600000,
-          },
-        ],
+        rooms: bookingDraft.booking_rooms && bookingDraft.booking_rooms.length > 0
+          ? bookingDraft.booking_rooms.flatMap((br: any, brIdx: number) => {
+              const count = br.count || 1;
+              const res = [];
+              for (let c = 0; c < count; c++) {
+                res.push({
+                  booking_room_id: newId * 100 + brIdx * 10 + c + 1,
+                  room_types_id: br.room_type_id || 1,
+                  room_id: null,
+                  room_type_name: br.room_type_name || 'Phòng Homestay',
+                  room_number: null,
+                  base_price: br.price || 600000,
+                });
+              }
+              return res;
+            })
+          : [
+              {
+                booking_room_id: newId * 10 + 1,
+                room_types_id: bookingDraft.room_type_id || 1,
+                room_id: bookingDraft.room_id || null,
+                room_type_name: bookingDraft.room_type_name || 'Phòng Homestay',
+                room_number: bookingDraft.room_number || null,
+                base_price: bookingDraft.base_price || 600000,
+              },
+            ],
         guests: (bookingDraft.guests || []).map((g: any, i: number) => ({
           id: newId * 10 + i + 1,
           full_name: g.full_name,
@@ -1217,7 +1256,7 @@ export const adminApi = {
     }
   },
 
-  createRoom: async (data: { apartment_id: number; room_type_id: number; room_number: string; status?: string; lock_id?: number | null }, role: StaffRole) => {
+  createRoom: async (data: { apartment_id: number; room_type_id: number; room_number: string; status?: string; lock_id?: number | null; special_features?: string }, role: StaffRole) => {
     try {
       const res = await api.post('/admin/rooms', data, getHeaders(role));
       return res.data;
@@ -1239,6 +1278,7 @@ export const adminApi = {
         is_hidden: false,
         created_at: new Date().toISOString(),
         is_ready_for_booking: (data.status || 'available') === 'available',
+        special_features: data.special_features || '',
       };
       list.unshift(newRoom);
       saveSimRooms(list);
@@ -1252,6 +1292,63 @@ export const adminApi = {
         saveSimBranches(branches);
       }
       return { success: true, room_id: newId, message: 'Thêm phòng thành công!' };
+    }
+  },
+
+  batchCreateRooms: async (data: BatchCreateRoomsPayload, role: StaffRole) => {
+    try {
+      const res = await api.post('/admin/rooms/batch', data, getHeaders(role));
+      return res.data;
+    } catch {
+      const list = getSimRooms();
+      const branches = getSimBranches();
+      const rts = getSimRoomTypes();
+      const apt = branches.find(b => b.id === Number(data.apartment_id));
+      const rt = rts.find(r => r.id === Number(data.room_type_id));
+
+      let currentMaxId = list.length > 0 ? Math.max(...list.map(r => r.room_id)) : 0;
+      const createdRooms: string[] = [];
+
+      data.rooms.forEach((item) => {
+        const num = item.room_number.trim();
+        if (!num) return;
+        const exists = list.some(r => r.apartment_id === Number(data.apartment_id) && r.room_number.toLowerCase() === num.toLowerCase());
+        if (!exists) {
+          currentMaxId += 1;
+          const newRoom: RoomItem = {
+            room_id: currentMaxId,
+            room_number: num,
+            apartment_id: Number(data.apartment_id),
+            apartment_name: apt?.name || `Chi nhánh #${data.apartment_id}`,
+            room_type_id: Number(data.room_type_id),
+            room_type_name: rt?.name || 'Phòng tiêu chuẩn',
+            status: item.status || 'available',
+            is_hidden: false,
+            created_at: new Date().toISOString(),
+            is_ready_for_booking: (item.status || 'available') === 'available',
+            special_features: item.special_features || '',
+          };
+          list.unshift(newRoom);
+          createdRooms.push(num);
+        }
+      });
+
+      saveSimRooms(list);
+      if (rt) {
+        rt.total_rooms = (rt.total_rooms || 0) + createdRooms.length;
+        saveSimRoomTypes(rts);
+      }
+      if (apt) {
+        apt.total_rooms = (apt.total_rooms || 0) + createdRooms.length;
+        apt.available_rooms = (apt.available_rooms || 0) + createdRooms.length;
+        saveSimBranches(branches);
+      }
+      return {
+        success: true,
+        createdCount: createdRooms.length,
+        createdRooms,
+        message: `Đã tạo thành công ${createdRooms.length} phòng mới!`,
+      };
     }
   },
 
@@ -1460,6 +1557,10 @@ export const adminApi = {
     search?: string;
     page?: number;
     limit?: number;
+    dateView?: string;
+    dateSub?: string;
+    from?: string;
+    to?: string;
   }, role: StaffRole) => {
     try {
       const queryParams = new URLSearchParams();
@@ -1475,6 +1576,10 @@ export const adminApi = {
       if (params.search) queryParams.set('search', params.search);
       if (params.page) queryParams.set('page', String(params.page));
       if (params.limit) queryParams.set('limit', String(params.limit));
+      if (params.dateView) queryParams.set('dateView', params.dateView);
+      if (params.dateSub) queryParams.set('dateSub', params.dateSub);
+      if (params.from) queryParams.set('from', params.from);
+      if (params.to) queryParams.set('to', params.to);
 
       const res = await api.get(`/admin/bookings?${queryParams.toString()}`, getHeaders(role));
       if (res.data) return res.data;
@@ -1482,6 +1587,9 @@ export const adminApi = {
 
     // Simulator Store fallback
     let list = getSimBookings();
+    if (params.apartment_id && params.apartment_id > 0) {
+      list = list.filter(b => b.apartment_id === params.apartment_id);
+    }
     const tab = params.tab || 'all';
     if (tab === 'pending_payment') list = list.filter(b => b.booking_status === 'pending_payment');
     else if (tab === 'confirmed') list = list.filter(b => b.booking_status === 'confirmed');
@@ -1502,7 +1610,27 @@ export const adminApi = {
     if (params.booking_type && params.booking_type !== 'all') {
       list = list.filter(b => b.booking_type === params.booking_type);
     }
+    // Lọc theo ngày (Hôm nay / Sắp tới)
+    if (params.dateView && params.dateView !== 'all') {
+      list = list.filter(b => matchesDateFilter(b as any, params.dateView as any, params.dateSub as any, { from: params.from, to: params.to }));
+      // B2: Sắp xếp theo start_at / booked_start_time tăng dần khi filter ngày active
+      list.sort((a, b) => new Date(a.booked_start_time).getTime() - new Date(b.booked_start_time).getTime());
+    }
     return list as any;
+  },
+
+  getDateCounts: async (apartmentId?: number, role: StaffRole = 'admin'): Promise<{ today: number; upcoming: number }> => {
+    try {
+      const q = apartmentId ? `?apartment_id=${apartmentId}` : '';
+      const res = await api.get(`/admin/bookings/date-counts${q}`, getHeaders(role));
+      if (res.data && typeof res.data.today === 'number') {
+        return res.data;
+      }
+    } catch {}
+
+    // Simulator Store fallback
+    const list = getSimBookings();
+    return computeDateCounts(list, apartmentId);
   },
 
   getBookingDetail: async (id: number, role: StaffRole) => {
@@ -2519,6 +2647,7 @@ const mockAdminRooms: RoomItem[] = [
     lock_status: 'online',
     battery_level: 85,
     is_ready_for_booking: true,
+    special_features: 'Ban công ngắm hoàng hôn 270°, bồn sục Jacuzzi ngoài trời',
   },
   {
     room_id: 2,

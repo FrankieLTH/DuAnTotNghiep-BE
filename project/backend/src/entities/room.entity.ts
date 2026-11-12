@@ -99,8 +99,11 @@ export class Room {
   @Column()
   room_number: string;
 
-  @Column({ type: 'enum', enum: ['available', 'maintenance'], default: 'available' })
-  status: 'available' | 'maintenance';
+  @Column({ type: 'enum', enum: ['available', 'occupied', 'cleaning', 'maintenance'], default: 'available' })
+  status: 'available' | 'occupied' | 'cleaning' | 'maintenance';
+
+  @Column({ type: 'varchar', length: 500, nullable: true, comment: 'Mô tả đặc điểm đặc biệt của phòng (nhập tay, không ảnh hưởng giá)' })
+  special_features?: string | null;
 
   @Column({ type: 'date', nullable: true })
   last_maintenance_date: string;
@@ -180,3 +183,22 @@ export class Service {
   @Column({ default: true })
   is_active: boolean;
 }
+
+@Entity('stay_type_config')
+export class StayTypeConfig {
+  @Column({ primary: true, length: 20 })
+  stay_type: string;
+
+  @Column({ length: 50 })
+  name: string;
+
+  @Column({ type: 'time' })
+  start_time: string;
+
+  @Column({ type: 'time' })
+  end_time: string;
+
+  @Column('decimal', { precision: 3, scale: 2 })
+  price_factor: number;
+}
+

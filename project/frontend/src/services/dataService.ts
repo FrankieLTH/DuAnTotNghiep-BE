@@ -1,4 +1,22 @@
 import api from './api';
+import {
+  SearchCriteria,
+  AvailableRoomType,
+  Recommendation,
+  RoomPlanItem,
+  computeStayWindow,
+  isOverlap,
+  recommend,
+  recommendWithFallback,
+} from '@shared/recommendation';
+import {
+  Basket,
+  buildBaskets,
+  fallbackBaskets,
+  DEFAULT_BASKET_CONFIG,
+} from '@shared/index';
+
+export type { SearchCriteria, AvailableRoomType, Recommendation, RoomPlanItem, Basket };
 
 export interface AmenityItem {
   id: number;
@@ -330,6 +348,13 @@ export const SEED_ROOMS: RoomItem[] = [
 // 4. DỮ LIỆU TỪ BẢNG SERVICES (seed_data.sql & datn1.sql)
 export const SEED_SERVICES: ServiceItem[] = [
   {
+    id: 10,
+    name: 'Thêm nệm phụ cao cấp (Topper 1m2)',
+    description: 'Nệm đơn 1m2 kèm đầy đủ bộ chăn ga gối nệm cao cấp cho khách thứ 3',
+    price: 150000,
+    is_active: true,
+  },
+  {
     id: 1,
     name: 'Thuê xe máy tay ga (1 ngày)',
     description: 'Xe Honda Vision/AirBlade đời mới đầy bình xăng',
@@ -549,6 +574,7 @@ export interface SearchParams {
   childrenAges: number[];
   rooms: number;
   promoCode?: string;
+  stayType?: 'overnight' | 'daytime' | 'fullday';
 }
 
 export interface NightPriceDetail {
@@ -611,6 +637,7 @@ export interface SelectedRoomDetail {
   count: number;
   price: number;
   max_occupancy: number;
+  has_extra_bed?: boolean;
 }
 
 export interface BookingDraft {
@@ -625,6 +652,8 @@ export interface BookingDraft {
   num_rooms: number;
   booking_rooms?: SelectedRoomDetail[]; // Danh sách các phòng đã chọn khớp Booking_rooms trong ERD
   total_capacity?: number; // Tổng sức chứa của tất cả các phòng đã chọn
+  has_extra_bed?: boolean;
+  extra_bed_fee?: number;
   check_in_date: string;
   check_out_date: string;
   nights: number;
@@ -834,3 +863,206 @@ export const PAYMENT_METHODS = [
   { id: 'card', name: 'Thẻ Quốc Tế (Visa / Mastercard / JCB)', isDefault: false },
   { id: 'ewallet', name: 'Ví Điện Tử (MoMo / ZaloPay)', isDefault: false },
 ];
+
+/**
+ * A3. SIMULATOR STORE: Tính danh sách phòng trống dùng chung logic overlap & status
+ */
+export async function getSimAvailableRoomTypes(criteria: SearchCriteria): Promise<AvailableRoomType[]> {
+  const { startAt, endAt } = computeStayWindow(criteria.checkIn, criteria.checkOut, criteria.stayType);
+  const allRooms = await getRooms({
+    apartment_id: criteria.apartmentId && criteria.apartmentId > 0 ? criteria.apartmentId : undefined,
+  });
+
+  // Simulator bookings from localStorage
+  let simBookings: any[] = [];
+  try {
+    const raw = localStorage.getItem('sim_data_bookings');
+    if (raw) simBookings = JSON.parse(raw);
+  } catch {}
+
+  // Gom theo room_type_id
+  const typeMap = new Map<
+    number,
+    {
+      roomTypeId: number;
+      apartmentId: number;
+      apartmentName: string;
+      name: string;
+      maxOccupancy: number;
+      basePrice: number;
+      area: number;
+      bedConfig: string;
+      image: string;
+      totalEligibleRooms: number;
+    }
+  >();
+
+  for (const r of allRooms) {
+    if (r.status === 'maintenance') continue; // CHỈ "Bảo trì" bị loại khỏi phòng trống
+    if (!typeMap.has(r.room_type_id)) {
+      typeMap.set(r.room_type_id, {
+        roomTypeId: r.room_type_id,
+        apartmentId: r.apartment_id,
+        apartmentName: r.apartment_name,
+        name: r.room_type_name,
+        maxOccupancy: r.max_occupancy,
+        basePrice: r.base_price,
+        area: parseInt(r.area, 10) || 28,
+        bedConfig: r.bed_type,
+        image: r.images?.[0] || 'https://images.unsplash.com/photo-1590490360182-c33d57733427?auto=format&fit=crop&w=800&q=80',
+        totalEligibleRooms: 0,
+      });
+    }
+    typeMap.get(r.room_type_id)!.totalEligibleRooms += 1;
+  }
+
+  // Đếm số booking chiếm trùng khung giờ
+  const occupiedCountMap = new Map<number, number>();
+  const nowMs = Date.now();
+
+  for (const b of simBookings) {
+    const bStatus = b.booking_status || b.status;
+    const isOccupying =
+      bStatus === 'confirmed' ||
+      bStatus === 'checked_in' ||
+      (bStatus === 'pending_payment' && (!b.hold_expires_at || new Date(b.hold_expires_at).getTime() > nowMs));
+
+    if (!isOccupying) continue;
+
+    const bStart = b.start_at || b.booked_start_time;
+    const bEnd = b.end_at || b.booked_end_time;
+    if (!bStart || !bEnd) continue;
+
+    if (isOverlap(startAt, endAt, bStart, bEnd)) {
+      if (b.rooms && Array.isArray(b.rooms)) {
+        for (const rm of b.rooms) {
+          const rtId = rm.room_types_id || rm.room_type_id;
+          if (rtId) {
+            occupiedCountMap.set(rtId, (occupiedCountMap.get(rtId) || 0) + 1);
+          }
+        }
+      } else if (b.room_type_id) {
+        occupiedCountMap.set(b.room_type_id, (occupiedCountMap.get(b.room_type_id) || 0) + (b.num_rooms || 1));
+      }
+    }
+  }
+
+  const results: AvailableRoomType[] = [];
+  for (const [, info] of typeMap.entries()) {
+    const occupied = occupiedCountMap.get(info.roomTypeId) || 0;
+    const available = Math.max(0, info.totalEligibleRooms - occupied);
+    if (available > 0) {
+      results.push({
+        roomTypeId: info.roomTypeId,
+        apartmentId: info.apartmentId,
+        apartmentName: info.apartmentName,
+        name: info.name,
+        maxOccupancy: info.maxOccupancy,
+        basePrice: info.basePrice,
+        availableCount: available,
+        area: info.area,
+        bedConfig: info.bedConfig,
+        image: info.image,
+      });
+    }
+  }
+
+  return results;
+}
+
+/**
+ * Lấy danh sách gợi ý phòng (gọi API backend, nếu lỗi thì fallback sang Simulator Store)
+ */
+export async function getRoomRecommendations(criteria: SearchCriteria): Promise<Recommendation[]> {
+  try {
+    const res = await api.get('/rooms/recommendations', {
+      params: {
+        apartment_id: criteria.apartmentId && criteria.apartmentId > 0 ? criteria.apartmentId : undefined,
+        check_in: criteria.checkIn,
+        check_out: criteria.checkOut,
+        stay_type: criteria.stayType,
+        adults: criteria.adults,
+        children: criteria.children,
+        rooms: criteria.rooms,
+        voucher_code: criteria.voucherCode,
+      },
+      timeout: 3000,
+    });
+    if (res.data && Array.isArray(res.data)) {
+      return res.data;
+    }
+  } catch (err) {
+    console.warn('API /rooms/recommendations unreachable, using Simulator recommendation fallback:', err);
+  }
+
+  // Fallback to simulator store using pure recommendWithFallback
+  const apartments = await getApartments();
+  return recommendWithFallback(
+    criteria,
+    (crit) => getSimAvailableRoomTypes(crit),
+    apartments.map((a) => ({ id: a.id, name: a.name }))
+  );
+}
+
+/**
+ * Lấy danh sách Giỏ phòng (Room Baskets)
+ * Gọi API backend /rooms/baskets, nếu lỗi thì fallback sang Simulator Store
+ */
+export async function getRoomBaskets(criteria: SearchCriteria): Promise<Basket[]> {
+  try {
+    const res = await api.get('/rooms/baskets', {
+      params: {
+        apartment_id: criteria.apartmentId && criteria.apartmentId > 0 ? criteria.apartmentId : undefined,
+        check_in: criteria.checkIn,
+        check_out: criteria.checkOut,
+        stay_type: criteria.stayType,
+        adults: criteria.adults,
+        children: criteria.children,
+        rooms: criteria.rooms,
+        voucher_code: criteria.voucherCode,
+        sort: criteria.sort,
+      },
+      timeout: 3000,
+    });
+    if (res.data && Array.isArray(res.data)) {
+      return res.data;
+    }
+  } catch (err) {
+    console.warn('API /rooms/baskets unreachable, using Simulator baskets fallback:', err);
+  }
+
+  // Fallback sang Simulator Store
+  const available = await getSimAvailableRoomTypes(criteria);
+
+  let voucherRule: any = null;
+  if (criteria.voucherCode && criteria.voucherCode.trim().length > 0) {
+    const vouchers = await getVouchers();
+    const match = vouchers.find(
+      (v) => v.code.toUpperCase() === criteria.voucherCode!.trim().toUpperCase()
+    );
+    if (match) {
+      voucherRule = {
+        code: match.code,
+        discount_type: match.discount_type,
+        discount_value: match.discount_value,
+        max_discount_amount: match.max_discount_amount,
+        min_order_value: match.min_order_value,
+      };
+    }
+  }
+
+  let baskets = buildBaskets(criteria, available, DEFAULT_BASKET_CONFIG, voucherRule);
+  if (baskets.length === 0) {
+    baskets = fallbackBaskets(criteria, available, DEFAULT_BASKET_CONFIG, voucherRule);
+  }
+
+  if (criteria.sort === 'price_asc') {
+    baskets.sort((a, b) => a.totalPrice - b.totalPrice);
+  } else if (criteria.sort === 'price_desc') {
+    baskets.sort((a, b) => b.totalPrice - a.totalPrice);
+  }
+
+  return baskets;
+}
+
+

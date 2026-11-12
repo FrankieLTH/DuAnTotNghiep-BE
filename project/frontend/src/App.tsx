@@ -24,6 +24,7 @@ import { VouchersPage } from './pages/VouchersPage';
 import { AdminPage } from './pages/AdminPage';
 
 import { SearchParams, BookingDraft } from './services/dataService';
+import type { Basket } from '@shared/index';
 
 export type ViewState =
   | 'home'
@@ -51,6 +52,8 @@ function App() {
 
   const [currentView, setCurrentView] = useState<ViewState>(getInitialView);
   const [selectedRoomId, setSelectedRoomId] = useState<number>(1);
+  const [selectedBasket, setSelectedBasket] = useState<Basket | null>(null);
+  const [previousView, setPreviousView] = useState<ViewState | null>(null);
   const [searchParams, setSearchParams] = useState<SearchParams | undefined>(undefined);
   const [bookingData, setBookingData] = useState<BookingDraft | any>(null);
 
@@ -81,8 +84,10 @@ function App() {
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
-  const handleSelectRoom = (roomId: number) => {
+  const handleSelectRoom = (roomId: number, sourceBasket?: Basket) => {
     setSelectedRoomId(roomId);
+    setSelectedBasket(sourceBasket || null);
+    setPreviousView(currentView);
     setCurrentView('room-detail');
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
@@ -184,7 +189,9 @@ function App() {
           <div className="pt-20">
             <RoomDetailPage
               roomId={selectedRoomId}
-              onGoBack={() => handleNavigate('home')}
+              searchParams={searchParams}
+              sourceBasket={selectedBasket}
+              onGoBack={() => handleNavigate(previousView || (searchParams ? 'search-results' : 'room-list'))}
               onProceedToCheckout={handleProceedToCheckoutFromDetail}
             />
           </div>

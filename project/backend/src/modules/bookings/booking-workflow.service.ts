@@ -2,10 +2,14 @@ import { Injectable, BadRequestException } from '@nestjs/common';
 import { DataSource } from 'typeorm';
 import * as dayjs from 'dayjs';
 import { BOOKING_TIME_CONFIG, SearchRoomsQueryDto, CreateDraftBookingDto } from '../../common/config/booking.config';
+import { AvailabilityService } from '../rooms/availability.service';
 
 @Injectable()
 export class BookingWorkflowService {
-  constructor(private readonly dataSource: DataSource) {}
+  constructor(
+    private readonly dataSource: DataSource,
+    private readonly availabilityService: AvailabilityService,
+  ) {}
 
   /**
    * Tính toán thời gian bắt đầu và kết thúc cố định theo loại đặt phòng (lấy từ config)
@@ -40,42 +44,29 @@ export class BookingWorkflowService {
       dto.check_out_date,
     );
 
-    const sql = `
-      SELECT 
-        rt.id AS room_types_id,
-        rt.name AS room_type_name,
-        rt.max_occupancy,
-        rt.bed_config,
-        rt.base_price,
-        apt.id AS apartment_id,
-        apt.name AS apartment_name,
-        apt.address AS apartment_address,
-        COUNT(DISTINCT r.id) AS available_rooms_count
-      FROM room_types rt
-      JOIN apartments apt ON rt.apartment_id = apt.id
-      JOIN rooms r ON r.room_types_id = rt.id AND r.status = 'available'
-      WHERE rt.max_occupancy >= ?
-        ${dto.apartment_id ? 'AND apt.id = ?' : ''}
-        AND r.id NOT IN (
-          SELECT DISTINCT br.room_id 
-          FROM Booking_rooms br
-          JOIN BOOKINGS b ON br.bookings_id = b.id
-          WHERE br.room_id IS NOT NULL
-            AND b.booking_status NOT IN ('cancelled', 'rejected')
-            AND (b.booking_status != 'draft' OR b.hold_expires_at > NOW())
-            AND (
-              (b.booked_start_time < ? AND b.booked_end_time > ?)
-            )
-        )
-      GROUP BY rt.id, apt.id
-      HAVING available_rooms_count > 0
-    `;
+    const availableRoomTypes = await this.availabilityService.getAvailableRoomTypes({
+      apartmentId: dto.apartment_id ? Number(dto.apartment_id) : undefined,
+      checkIn: dto.check_in_date,
+      checkOut: dto.check_out_date,
+      stayType: dto.booking_type,
+      adults: Number(dto.adults),
+      children: Number(dto.children),
+      rooms: 1,
+    });
 
-    const params = dto.apartment_id
-      ? [totalGuests, dto.apartment_id, bookedEndTime, bookedStartTime]
-      : [totalGuests, bookedEndTime, bookedStartTime];
-
-    const availableRoomTypes = await this.dataSource.query(sql, params);
+    const filteredResults = availableRoomTypes
+      .filter((rt) => rt.maxOccupancy >= totalGuests)
+      .map((rt) => ({
+        room_types_id: rt.roomTypeId,
+        room_type_name: rt.name,
+        max_occupancy: rt.maxOccupancy,
+        bed_config: rt.bedConfig,
+        base_price: rt.basePrice,
+        apartment_id: rt.apartmentId,
+        apartment_name: rt.apartmentName,
+        apartment_address: '',
+        available_rooms_count: rt.availableCount,
+      }));
 
     return {
       search_meta: {
@@ -86,7 +77,7 @@ export class BookingWorkflowService {
         children: Number(dto.children),
         total_guests: totalGuests,
       },
-      results: availableRoomTypes,
+      results: filteredResults,
     };
   }
 

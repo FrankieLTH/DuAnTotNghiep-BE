@@ -351,7 +351,7 @@ export const SearchBookingBar: React.FC<SearchBookingBarProps> = ({
               <div className="flex items-center justify-between">
                 <div>
                   <span className="font-bold text-[#241C18] text-sm block">Người lớn</span>
-                  <span className="text-[11px] text-[#73665C]">Từ 18 tuổi trở lên (Tối thiểu 1)</span>
+                  <span className="text-[11px] text-[#73665C]">Từ 15 tuổi trở lên (Tối thiểu 1)</span>
                 </div>
                 <div className="flex items-center gap-3">
                   <button
@@ -377,8 +377,8 @@ export const SearchBookingBar: React.FC<SearchBookingBarProps> = ({
               <div className="space-y-3 pt-3 border-t border-[#EBE6DE]">
                 <div className="flex items-center justify-between">
                   <div>
-                    <span className="font-bold text-[#241C18] text-sm block">Trẻ em</span>
-                    <span className="text-[11px] text-[#73665C]">Dưới 18 tuổi</span>
+                    <span className="font-bold text-[#241C18] text-sm block">Trẻ em (dưới 15 tuổi)</span>
+                    <span className="text-[11px] text-[#73665C]">Miễn phí, không tính sức chứa</span>
                   </div>
                   <div className="flex items-center gap-3">
                     <button

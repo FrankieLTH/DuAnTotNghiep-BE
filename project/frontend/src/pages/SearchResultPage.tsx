@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { SearchBookingBar } from '../components/home/SearchBookingBar';
 import { useRealtimeSync } from '../hooks/useRealtimeSync';
 import {
@@ -7,13 +7,16 @@ import {
   BookingDraft,
   BookingGuestSlot,
 } from '../services/dataService';
+import { suggestRoomTypes, SuggestedRoomType } from '../../../shared/helpers/roomSuggestion';
+import { RoomBasketList } from '../components/room-list/RoomBasketList';
+import type { Basket } from '@shared/index';
 
 interface SearchResultPageProps {
   searchParams?: SearchParams;
   onGoHome: () => void;
   onGoRoomList: () => void;
   onSelectRoomType: (draft: BookingDraft) => void;
-  onSelectRoomDetail?: (roomId: number) => void;
+  onSelectRoomDetail?: (roomId: number, sourceBasket?: Basket) => void;
   onSearchAgain?: (params: SearchParams) => void;
 }
 
@@ -103,6 +106,7 @@ export const SearchResultPage: React.FC<SearchResultPageProps> = ({
   const [selectedRoomCounts, setSelectedRoomCounts] = useState<Record<number, number>>({});
   const [errorNotice, setErrorNotice] = useState<string | null>(null);
   const [visibleCount, setVisibleCount] = useState<number>(2); // Hiển thị 2 chi nhánh đầu tiên, có nút Xem thêm
+  const [viewMode, setViewMode] = useState<'baskets' | 'individual'>('baskets');
   const [, setSyncKey] = useState<number>(0);
 
   // Lắng nghe sự kiện realtime từ Admin: cập nhật tình trạng phòng trống ngay khi Admin tạo / hủy đơn
@@ -113,11 +117,78 @@ export const SearchResultPage: React.FC<SearchResultPageProps> = ({
     },
   });
 
-  const handleRoomCountChange = (roomId: number, count: number) => {
-    setSelectedRoomCounts((prev) => ({
-      ...prev,
-      [roomId]: count,
-    }));
+  // Số phòng hiệu lực n: n = min(max(1, roomsWanted), tổng khách)
+  const effectiveN = Math.min(
+    Math.max(1, currentParams.rooms || 1),
+    totalPeople
+  );
+
+  const handleRoomCountChange = (
+    branchRooms: RoomData[],
+    roomId: number,
+    targetCount: number
+  ) => {
+    const targetRoom = branchRooms.find((r) => r.id === roomId);
+    if (!targetRoom) return;
+
+    // Giới hạn trong khoảng [0, min(availableCount, effectiveN)]
+    const newCount = Math.max(
+      0,
+      Math.min(targetCount, targetRoom.availableCount, effectiveN)
+    );
+    const currentCount = selectedRoomCounts[roomId] || 0;
+
+    if (newCount === currentCount) return;
+
+    setSelectedRoomCounts((prev) => {
+      const nextCounts = { ...prev };
+
+      // Giảm phòng: cho phép giảm tự do (tổng có thể <= n theo rule 4.5)
+      if (newCount < currentCount) {
+        nextCounts[roomId] = newCount;
+        return nextCounts;
+      }
+
+      // Tăng phòng:
+      const otherRooms = branchRooms.filter((r) => r.id !== roomId);
+      const otherTotal = otherRooms.reduce(
+        (sum, r) => sum + (nextCounts[r.id] || 0),
+        0
+      );
+      const newTotal = otherTotal + newCount;
+
+      // Nếu tổng mới <= effectiveN: cập nhật bình thường
+      if (newTotal <= effectiveN) {
+        nextCounts[roomId] = newCount;
+        return nextCounts;
+      }
+
+      // Nếu tổng mới > effectiveN: Tự cân bằng (Auto-balance)
+      let excess = newTotal - effectiveN;
+
+      // Ưu tiên giảm card có số phòng lớn nhất; nếu hòa thì card đứng cao hơn trong danh sách
+      const sortedOthers = otherRooms
+        .map((r, idx) => ({ room: r, count: nextCounts[r.id] || 0, index: idx }))
+        .filter((item) => item.count > 0)
+        .sort((a, b) => {
+          if (b.count !== a.count) return b.count - a.count;
+          return a.index - b.index;
+        });
+
+      for (const item of sortedOthers) {
+        if (excess <= 0) break;
+        const deduct = Math.min(item.count, excess);
+        nextCounts[item.room.id] -= deduct;
+        excess -= deduct;
+      }
+
+      // Cắt lại nếu không còn phòng khác để giảm
+      const finalCount = newCount - excess;
+      nextCounts[roomId] = Math.max(0, finalCount);
+
+      return nextCounts;
+    });
+
     setErrorNotice(null);
   };
 
@@ -314,6 +385,33 @@ export const SearchResultPage: React.FC<SearchResultPageProps> = ({
     },
   ];
 
+  // Tự động điền số phòng theo suggestedQty khi bộ lọc thay đổi
+  useEffect(() => {
+    const initialCounts: Record<number, number> = {};
+    branchesData.forEach((branch) => {
+      const suggested = suggestRoomTypes(branch.rooms, {
+        adults: currentParams.adults,
+        children: currentParams.children,
+        roomsWanted: currentParams.rooms || 1,
+        childrenAges: currentParams.childrenAges,
+        countableGuests,
+      });
+      suggested.forEach((item) => {
+        initialCounts[item.room.id] = item.suggestedQty;
+      });
+    });
+    setSelectedRoomCounts(initialCounts);
+  }, [
+    currentParams.adults,
+    currentParams.children,
+    currentParams.childrenAges,
+    currentParams.rooms,
+    currentParams.checkIn,
+    currentParams.checkOut,
+    currentParams.branchId,
+    countableGuests,
+  ]);
+
   // Lọc chi nhánh theo bộ lọc (nếu branchId === 0 hoặc không chọn thì hiện cả 3 cơ sở)
   const displayedBranches = branchesData.filter((branch) => {
     if (!currentParams.branchId || currentParams.branchId === 0) {
@@ -477,6 +575,107 @@ export const SearchResultPage: React.FC<SearchResultPageProps> = ({
     onSelectRoomType(draft);
   };
 
+  const handleSelectBasket = (basket: Basket) => {
+    const branch = displayedBranches[0] || {
+      id: 1,
+      name: 'Đồi Bông Gòn - CN1: Hải Đăng',
+      address: 'Đường Hải Đăng, Phường 2, TP. Vũng Tàu',
+    };
+
+    const firstItem = basket.items[0];
+    const selectedBookingRooms = basket.items.map((it) => ({
+      room_type_id: it.roomTypeId,
+      room_type_name: it.roomTypeName,
+      room_type_image: it.image || 'https://images.unsplash.com/photo-1590490360182-c33d57733427?auto=format&fit=crop&w=800&q=80',
+      count: it.quantity,
+      price: it.basePrice || Math.round(it.unitPrice / calculatedNights),
+      max_occupancy: 2,
+    }));
+
+    const slots: BookingGuestSlot[] = [];
+    let slotIdx = 1;
+    for (let i = 0; i < currentParams.adults; i++) {
+      slots.push({
+        id: `slot-${slotIdx}`,
+        slot_index: slotIdx,
+        guest_type: 'adult',
+        is_booker: slotIdx === 1,
+        is_foreigner: false,
+        full_name: '',
+        date_of_birth: '',
+        id_type: 'cccd',
+        id_number: '',
+        slot_status: 'empty',
+        retry_count: 0,
+      });
+      slotIdx++;
+    }
+    for (let i = 0; i < currentParams.children; i++) {
+      slots.push({
+        id: `slot-${slotIdx}`,
+        slot_index: slotIdx,
+        guest_type: 'child',
+        is_booker: false,
+        is_foreigner: false,
+        full_name: '',
+        date_of_birth: '',
+        id_type: 'cccd',
+        id_number: '',
+        slot_status: 'empty',
+        retry_count: 0,
+      });
+      slotIdx++;
+    }
+
+    const draft: BookingDraft = {
+      id: `draft_${Date.now()}`,
+      booking_code: `BK-2026-${Math.floor(1000 + Math.random() * 9000)}`,
+      apartment_id: branch.id,
+      apartment_name: branch.name,
+      apartment_address: branch.address,
+      room_type_id: firstItem.roomTypeId,
+      room_type_name: firstItem.roomTypeName,
+      room_type_image: firstItem.image || '',
+      num_rooms: basket.totalRooms,
+      booking_rooms: selectedBookingRooms,
+      total_capacity: basket.totalCapacity,
+      check_in_date: currentParams.checkIn,
+      check_out_date: currentParams.checkOut,
+      nights: calculatedNights,
+      num_adults: currentParams.adults,
+      num_children: currentParams.children,
+      children_ages: currentParams.childrenAges,
+      price_breakdown: [
+        {
+          date: currentParams.checkIn,
+          dayOfWeek: 'Ngày nhận phòng',
+          basePrice: firstItem.basePrice || Math.round(firstItem.unitPrice / calculatedNights),
+          extraFeePercent: 0,
+          extraFeeAmount: 0,
+          finalPricePerRoom: firstItem.basePrice || Math.round(firstItem.unitPrice / calculatedNights),
+        },
+      ],
+      room_subtotal: basket.totalPrice,
+      extra_fee_total: 0,
+      service_total: 0,
+      discount_amount: basket.discountAmount || 0,
+      total_price: basket.totalPrice,
+      hold_expires_at: Date.now() + 30 * 60 * 1000,
+      status: 'pending_info',
+      booker: {
+        full_name: '',
+        email: '',
+        phone: '',
+        is_staying: true,
+        email_verified: false,
+        consent_data_protection: false,
+      },
+      guests: slots,
+    };
+
+    onSelectRoomType(draft);
+  };
+
   return (
     <div className="bg-[#FAF6F0] min-h-screen pb-20 font-sans text-[#241C18]">
       {/* 1. Header Banner nền tối với Tiêu đề và Search Bar nổi (Y hệt ảnh 1) */}
@@ -554,7 +753,7 @@ export const SearchResultPage: React.FC<SearchResultPageProps> = ({
       )}
 
       {/* 2. Thanh Sub-header tối giản, tiện ích trực quan */}
-      <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 pt-20 pb-6">
+      <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 pt-20 pb-4">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-[#E8E2D8]">
           <div className="flex items-center gap-2 text-xs font-semibold text-[#73665C]">
             <span className="w-2 h-2 rounded-full bg-[#C4572E]"></span>
@@ -571,7 +770,68 @@ export const SearchResultPage: React.FC<SearchResultPageProps> = ({
         </div>
       </div>
 
-      {/* 3. Danh sách các Khối Chi Nhánh (Grouped by Branch Cards - Y hệt ảnh 1) */}
+      {/* CÔNG TẮC CHẾ ĐỘ HIỂN THỊ: THEO GIỎ PHÒNG (MẶC ĐỊNH) HOẶC XEM TỪNG LOẠI PHÒNG */}
+      <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 mb-6">
+        <div className="bg-[#FAF8F5] border border-[#E8E2D8] p-2 rounded-2xl flex flex-col sm:flex-row items-center justify-between gap-4 shadow-2xs">
+          <div className="inline-flex bg-[#EAE6DE] p-1 rounded-xl w-full sm:w-auto">
+            <button
+              type="button"
+              onClick={() => setViewMode('baskets')}
+              className={`flex-1 sm:flex-none px-5 py-2 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-2 cursor-pointer ${
+                viewMode === 'baskets'
+                  ? 'bg-white text-[#1A1615] shadow-xs'
+                  : 'text-[#736B63] hover:text-[#1A1615]'
+              }`}
+            >
+              <span className={`w-2 h-2 rounded-full ${viewMode === 'baskets' ? 'bg-[#9E472A]' : 'bg-transparent'}`}></span>
+              Theo Giỏ Phòng (Mặc định)
+              <span className="bg-[#9E472A] text-white text-[10px] px-1.5 py-0.2 rounded-full font-bold">
+                Tối ưu
+              </span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setViewMode('individual')}
+              className={`flex-1 sm:flex-none px-5 py-2 rounded-lg text-xs font-semibold transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+                viewMode === 'individual'
+                  ? 'bg-white text-[#1A1615] shadow-xs'
+                  : 'text-[#736B63] hover:text-[#1A1615]'
+              }`}
+            >
+              Xem từng loại phòng
+            </button>
+          </div>
+
+          <div className="text-xs text-[#736B63] text-center sm:text-right">
+            {viewMode === 'baskets' ? (
+              <span>✨ Hệ thống tự động ghép {currentParams.rooms} phòng phù hợp nhất cho đoàn</span>
+            ) : (
+              <span>Tự chọn số lượng từng loại phòng theo ý muốn</span>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {viewMode === 'baskets' ? (
+        <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 pb-10">
+          <RoomBasketList
+            criteria={{
+              apartmentId: displayedBranches[0]?.id,
+              checkIn: currentParams.checkIn,
+              checkOut: currentParams.checkOut,
+              stayType: currentParams.stayType || 'fullday',
+              adults: currentParams.adults,
+              children: currentParams.children,
+              rooms: currentParams.rooms,
+            }}
+            onSelectBasket={handleSelectBasket}
+            onSwitchToIndividual={() => setViewMode('individual')}
+            onSelectRoomDetail={onSelectRoomDetail}
+          />
+        </div>
+      ) : (
+      /* 3. Danh sách các Khối Chi Nhánh (Grouped by Branch Cards - Y hệt ảnh 1) */
       <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 space-y-12">
         {displayedBranches.slice(0, visibleCount).map((branch) => {
           // Tính tổng tiền các phòng đã chọn trong cơ sở này
@@ -620,8 +880,18 @@ export const SearchResultPage: React.FC<SearchResultPageProps> = ({
 
               {/* Danh sách các phòng dạng Card Nằm Ngang (Horizontal Layout) */}
               <div className="space-y-5">
-                {branch.rooms.map((room) => {
+                {suggestRoomTypes(branch.rooms, {
+                  adults: currentParams.adults,
+                  children: currentParams.children,
+                  roomsWanted: currentParams.rooms || 1,
+                  childrenAges: currentParams.childrenAges,
+                  countableGuests,
+                }).map(({ room, isBestFit, fitStatus }) => {
                   const currentCount = selectedRoomCounts[room.id] || 0;
+                  const isPlusDisabled =
+                    room.availableCount === 0 ||
+                    currentCount >= room.availableCount ||
+                    currentCount >= effectiveN;
 
                   return (
                     <div
@@ -638,7 +908,12 @@ export const SearchResultPage: React.FC<SearchResultPageProps> = ({
                           alt={room.name}
                           className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
                         />
-                        <div className="absolute top-2.5 left-2.5 pointer-events-none">
+                        <div className="absolute top-2.5 left-2.5 flex flex-col gap-1 pointer-events-none">
+                          {isBestFit && (
+                            <span className="bg-[#2A694E] text-white text-[9px] font-mono font-bold px-2 py-0.5 rounded shadow-xs inline-flex items-center gap-1">
+                              ★ PHÙ HỢP NHẤT
+                            </span>
+                          )}
                           <span className="bg-[#C4572E] text-white text-[9px] font-mono font-bold px-2 py-0.5 rounded shadow-xs">
                             {room.badge}
                           </span>
@@ -722,29 +997,67 @@ export const SearchResultPage: React.FC<SearchResultPageProps> = ({
                           </span>
                         </div>
 
-                        {/* Dropdown chọn số lượng phòng (Y hệt ảnh 1) */}
+                        {/* Dropdown chọn số lượng phòng (Kèm bộ tự cân bằng) */}
                         <div className="w-full">
                           <label className="block text-[10px] font-bold uppercase tracking-wider text-[#73665C] mb-1 lg:text-right">
                             Số lượng phòng (còn {room.availableCount} phòng)
                           </label>
-                          <select
-                            value={currentCount}
-                            onChange={(e) =>
-                              handleRoomCountChange(room.id, Number(e.target.value))
-                            }
-                            className={`w-full bg-white border text-xs font-semibold rounded-xl px-3 py-2 focus:outline-none cursor-pointer transition-colors ${
-                              currentCount > 0
-                                ? 'border-[#C4572E] text-[#241C18] bg-[#FAF6F0]'
-                                : 'border-[#D0C8BC] text-[#73665C]'
-                            }`}
-                          >
-                            <option value={0}>0 phòng (Chưa chọn)</option>
-                            {Array.from({ length: room.availableCount }, (_, i) => i + 1).map((n) => (
-                              <option key={n} value={n}>
-                                {n} phòng ({(room.price * n).toLocaleString('vi-VN')}đ)
-                              </option>
-                            ))}
-                          </select>
+                          <div className="flex items-center gap-1.5">
+                            <button
+                              type="button"
+                              disabled={currentCount <= 0}
+                              onClick={() => handleRoomCountChange(branch.rooms, room.id, currentCount - 1)}
+                              className="w-8 h-8 rounded-lg border border-[#D0C8BC] bg-white text-[#241C18] font-bold text-xs hover:bg-[#FAF6F0] disabled:opacity-30 disabled:cursor-not-allowed flex items-center justify-center shrink-0 cursor-pointer"
+                              title="Giảm 1 phòng"
+                            >
+                              –
+                            </button>
+                            <select
+                              value={currentCount}
+                              onChange={(e) =>
+                                handleRoomCountChange(branch.rooms, room.id, Number(e.target.value))
+                              }
+                              className={`w-full bg-white border text-xs font-semibold rounded-xl px-2.5 py-2 focus:outline-none cursor-pointer transition-colors ${
+                                currentCount > 0
+                                  ? 'border-[#C4572E] text-[#241C18] bg-[#FAF6F0]'
+                                  : 'border-[#D0C8BC] text-[#73665C]'
+                              }`}
+                            >
+                              <option value={0}>0 phòng (Chưa chọn)</option>
+                              {Array.from({ length: room.availableCount }, (_, i) => i + 1).map((n) => (
+                                <option key={n} value={n}>
+                                  {n} phòng ({(room.price * n).toLocaleString('vi-VN')}đ)
+                                </option>
+                              ))}
+                            </select>
+                            <button
+                              type="button"
+                              disabled={isPlusDisabled}
+                              onClick={() => handleRoomCountChange(branch.rooms, room.id, currentCount + 1)}
+                              className="w-8 h-8 rounded-lg border border-[#D0C8BC] bg-white text-[#241C18] font-bold text-xs hover:bg-[#FAF6F0] disabled:opacity-30 disabled:cursor-not-allowed flex items-center justify-center shrink-0 cursor-pointer"
+                              title={
+                                room.availableCount === 0
+                                  ? 'Hết phòng'
+                                  : currentCount >= room.availableCount
+                                  ? 'Đã đạt tối đa số phòng trống'
+                                  : currentCount >= effectiveN
+                                  ? `Đã đạt tối đa ${effectiveN} phòng`
+                                  : 'Tăng 1 phòng'
+                              }
+                            >
+                              +
+                            </button>
+                          </div>
+                          {fitStatus === 'not_enough_capacity' && (
+                            <span className="text-[10px] text-[#A85A2A] block mt-1 lg:text-right font-medium">
+                              Chưa đủ sức chứa nếu chọn riêng loại này
+                            </span>
+                          )}
+                          {fitStatus === 'sold_out' && (
+                            <span className="text-[10px] text-[#A83232] block mt-1 lg:text-right font-medium">
+                              Hết phòng trong khung giờ này
+                            </span>
+                          )}
                         </div>
 
                         {/* Nút Xem chi tiết phòng & ảnh */}
@@ -820,11 +1133,19 @@ export const SearchResultPage: React.FC<SearchResultPageProps> = ({
                 <button
                   type="button"
                   onClick={() => handleProceedBranchBooking(branch)}
+                  disabled={branchChosenCount === 0 || branchChosenCapacity < countableGuests}
                   className={`w-full sm:w-auto px-6 py-3 rounded-xl text-xs sm:text-sm font-semibold uppercase tracking-wider transition-all transform active:scale-95 cursor-pointer shadow-md flex items-center justify-center gap-2 ${
-                    branchChosenCount > 0
+                    branchChosenCount > 0 && branchChosenCapacity >= countableGuests
                       ? 'bg-[#C4572E] hover:bg-[#b04a24] text-white'
-                      : 'bg-white/15 hover:bg-white/25 text-white/90 border border-white/20'
+                      : 'bg-white/15 text-white/50 border border-white/20 cursor-not-allowed opacity-60'
                   }`}
+                  title={
+                    branchChosenCount === 0
+                      ? 'Vui lòng chọn ít nhất 1 phòng'
+                      : branchChosenCapacity < countableGuests
+                      ? `Sức chứa ${branchChosenCapacity} chưa đủ cho ${countableGuests} khách`
+                      : 'Tiếp tục đặt phòng'
+                  }
                 >
                   <span>Tiếp tục đặt phòng - Cơ sở này</span>
                   <span>→</span>
@@ -834,6 +1155,7 @@ export const SearchResultPage: React.FC<SearchResultPageProps> = ({
           );
         })}
       </div>
+      )}
 
       {/* 4. Banner Voucher Sang Trọng Ở Cuối Trang (Y hệt ảnh 1) */}
       <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 mt-14">
