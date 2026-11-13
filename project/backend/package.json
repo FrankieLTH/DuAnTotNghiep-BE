@@ -25,10 +25,10 @@
     "test:cov": "jest --coverage",
     "test:debug": "node --inspect-brk -r tsconfig-paths/register -r ts-node/register node_modules/.bin/jest --runInBand",
     "test:e2e": "jest --config ./test/jest-e2e.json",
-    "test:customer": "node test/customer-accounts.cjs && node test/customer-management.cjs",
-    "test:customer:mailpit": "node test/customer-e2e.cjs",
-    "test:customer-management": "node test/customer-management.cjs",
-    "test:customer-accounts": "node test/customer-accounts.cjs"
+    "test:customer": "npm run build && node test/customer-accounts.cjs",
+    "test:customer-management": "npm run test:customer",
+    "test:customer-accounts": "npm run test:customer",
+    "test:customer:smtp": "node test/customer-deployment.cjs"
   },
   "dependencies": {
     "@nestjs-modules/mailer": "^1.11.2",

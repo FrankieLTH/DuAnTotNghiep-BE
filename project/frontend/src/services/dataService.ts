@@ -614,6 +614,10 @@ export interface SelectedRoomDetail {
 }
 
 export interface BookingDraft {
+  server_booking_id?: number;
+  resume_stage?: 'booker' | 'guests' | 'payment';
+  customer_scope?: 'account' | 'lookup';
+  stay_type?: 'overnight' | 'daytime' | 'fullday';
   id: string;
   booking_code: string;
   apartment_id: number;

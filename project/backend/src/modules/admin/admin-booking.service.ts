@@ -1024,7 +1024,7 @@ export class AdminBookingService {
   async expireOverdueHolds() {
     const overdueBookings = await this.dataSource.query(
       `SELECT id, apartment_id, customer_id FROM BOOKINGS
-       WHERE booking_status = 'pending_payment'
+       WHERE booking_status IN ('draft', 'pending_payment')
          AND hold_expires_at IS NOT NULL
          AND hold_expires_at <= NOW()`
     );
@@ -1073,7 +1073,7 @@ export class AdminBookingService {
       `SELECT id, booking_code, apartment_id, hold_expires_at,
               TIMESTAMPDIFF(SECOND, NOW(), hold_expires_at) AS remaining_seconds
        FROM BOOKINGS
-       WHERE booking_status = 'pending_payment'
+       WHERE booking_status IN ('draft', 'pending_payment')
          AND hold_expires_at > NOW()
          AND hold_expires_at <= DATE_SUB(NOW(), INTERVAL -5 MINUTE)
          ${aptFilter}

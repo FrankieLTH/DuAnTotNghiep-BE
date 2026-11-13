@@ -1,8 +1,8 @@
 # Chạy ứng dụng local
 
-Thiết kế tài khoản hiện hành: [CUSTOMER_ACCOUNT_V2.md](docs/CUSTOMER_ACCOUNT_V2.md). Khách có tài khoản đăng nhập email + mật khẩu tại http://localhost/account; khách vãng lai tra cứu email + OTP tại http://localhost/booking-lookup. Chạy `npm run db:customer-management --prefix project/backend` để bổ sung trường tài khoản và bảng yêu cầu, giữ nguyên booking cũ.
+Tài khoản và tra cứu dùng chung trang **http://localhost/tra-cuu**: khách vãng lai xác thực email + OTP; khách có tài khoản dùng email + mật khẩu sau khi xác minh đăng ký. Các đường dẫn `/account` và `/booking-lookup` cũ vẫn truy cập được. Hướng dẫn bản hiện tại: [CUSTOMER_ACCOUNTS.md](docs/CUSTOMER_ACCOUNTS.md).
 
-Tài khoản khách hàng và tra cứu booking bằng email + OTP: xem [thiết kế và use case](docs/CUSTOMER_ACCOUNT.md). Email OTP gửi qua SMTP thật; cấu hình `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`, `SMTP_USER`, `SMTP_PASS`, `SMTP_FROM` trong `project/backend/.env`. Với Gmail dùng cổng 587, secure=false và mật khẩu ứng dụng. Docker Compose chỉ chạy MySQL và Redis. Giao diện hiện dùng cổng 80 theo `vite.config.ts`: http://localhost/account và http://localhost/booking-lookup.
+SMTP gửi email thật được cấu hình trong `project/backend/.env`. Với Gmail dùng cổng 587, `SMTP_SECURE=false` và mật khẩu ứng dụng. Không đưa file `.env` hoặc thông tin SMTP lên GitHub. Docker Compose của nhánh chỉ chạy MySQL và Redis.
 
 Backend hiện dùng MySQL 8, frontend dùng Vite. Cài Node.js và các dependencies:
 
@@ -26,7 +26,7 @@ Nếu dùng MySQL có sẵn (ví dụ Laragon), khởi động MySQL đó và d�
 
 Tạo `project/backend/.env` từ `.env.example` nếu chưa có, rồi chỉnh các biến `DB_*`. Không ghi đè `.env` đang dùng.
 
-Nếu database đã có dữ liệu, bổ sung bảng yêu cầu quản lý booking (không xóa dữ liệu): `npm run db:customer-management --prefix project/backend`. Tài khoản và quản lý booking: http://localhost/account; chi tiết đối chiếu use case/ERD ở [CUSTOMER_MANAGEMENT.md](docs/CUSTOMER_MANAGEMENT.md).
+Nếu database đã có dữ liệu, chạy `npm run db:customer-management --prefix project/backend` để bổ sung các trường tài khoản/checkout cần thiết. Migration giữ dữ liệu cũ và chuyển các yêu cầu từ bảng thêm `booking_requests` về booking trước khi bỏ bảng đó. Không chạy lệnh reset database.
 
 Với database local mới:
 

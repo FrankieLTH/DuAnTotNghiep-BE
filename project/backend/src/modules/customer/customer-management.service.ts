@@ -1,10 +1,11 @@
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
-import { DataSource, In } from 'typeorm';
-import { Booking, BookingRoom, BookingRequest, LockPin, Payment, Transaction, AuditLog, Refund } from '../../entities/booking.entity';
+import { DataSource, EntityManager } from 'typeorm';
+import { Booking, BookingRoom, LockPin, Payment, Transaction, AuditLog, Refund } from '../../entities/booking.entity';
 import { customerNetPaid } from './customer-finance';
 import { Customer } from '../../entities/user.entity';
 import { RoomType } from '../../entities/room.entity';
 import { CustomerBookingRequestDto, ReviewCustomerRequestDto, UpdateCustomerProfileDto } from './customer.dto';
+import { BookingStatus } from '@shared/enums';
 import { StaffContext } from '../../common/config/permissions.config';
 
 @Injectable()
@@ -27,10 +28,25 @@ export class CustomerManagementService {
     return booking;
   }
 
+  private requestView(row: any, refunds: Refund[]) {
+    const refund = refunds.find(r => r.id === row.refund_id);
+    const status = refund ? ({ requested: row.status === 'reviewing' ? 'reviewing' : 'pending', approved: 'approved', rejected: 'rejected', processed: 'processed' })[refund.status] : row.status;
+    return { ...row, status, ...(refund ? { refund_amount: Number(refund.refund_amount) } : {}) };
+  }
+  private async refundRequest(manager: EntityManager, bookingId: number, reason: string) {
+    const transactions = await manager.getRepository(Transaction).findBy({ booking_id: bookingId });
+    const payments = await manager.getRepository(Payment).findBy({ booking_id: bookingId });
+    const refunds = await manager.getRepository(Refund).findBy({ booking_id: bookingId });
+    const available = customerNetPaid(payments, transactions, refunds) - refunds.filter(r => ['requested', 'approved'].includes(r.status)).reduce((n, r) => n + Number(r.refund_amount), 0);
+    if (available <= 0) throw new BadRequestException('Không còn khoản thanh toán có thể yêu cầu hoàn.');
+    const paidRows = payments.filter(p => p.payment_status === 'paid');
+    const payment = paidRows.length === 1 && Number(paidRows[0].amount) >= available ? paidRows[0] : null;
+    return manager.getRepository(Refund).save({ booking_id: bookingId, payment_id: payment?.id || null, refund_amount: available, reason, status: 'requested' });
+  }
   async requests(customerId: number, bookingId: number) {
-    await this.ownedBooking(customerId, bookingId);
-    const rows = await this.db.getRepository(BookingRequest).find({ where: { booking_id: bookingId, customer_id: customerId }, order: { created_at: 'DESC' } });
-    return rows.map(({ handled_by, customer, booking, ...request }) => request);
+    const booking = await this.ownedBooking(customerId, bookingId);
+    const refunds = await this.db.getRepository(Refund).findBy({ booking_id: bookingId });
+    return (booking.checkout_data?.requests || []).map(row => this.requestView(row, refunds)).sort((a, b) => b.id - a.id);
   }
 
   async roomOptions(customerId: number, bookingId: number) {
@@ -75,15 +91,19 @@ export class CustomerManagementService {
         const roomCount = Math.max(1, await manager.getRepository(BookingRoom).countBy({ bookings_id: bookingId }));
         if (type.max_occupancy * roomCount < booking.adults) throw new BadRequestException('Loại phòng không đủ sức chứa cho đoàn.');
       }
-      const repo = manager.getRepository(BookingRequest);
-      if (await repo.existsBy({ booking_id: bookingId, type: data.type, status: In(['pending', 'reviewing']) })) {
+      const rows = booking.checkout_data?.requests || [];
+      if (rows.some(row => row.type === data.type && ['pending', 'reviewing'].includes(row.status))) {
         throw new ConflictException('Yêu cầu cùng loại đang được xử lý. Bạn có thể theo dõi phản hồi bên dưới.');
       }
-      const request = await repo.save(repo.create({ booking_id: bookingId, customer_id: customerId, type: data.type, reason: data.reason,
+      const refund = data.type === 'refund' ? await this.refundRequest(manager, bookingId, data.reason) : null;
+      const log = await manager.getRepository(AuditLog).save({ actor: `customer:${customerId}`, action: 'CUSTOMER_BOOKING_REQUEST', entity_type: 'BOOKINGS', entity_id: bookingId, new_value: JSON.stringify({ type: data.type, reason: data.reason }) });
+      const request = { id: log.id, booking_id: bookingId, customer_id: customerId, type: data.type, status: 'pending', reason: data.reason, created_at: new Date().toISOString(),
         requested_end_date: data.type === 'extend' ? data.requested_end_date : null,
         requested_room_type_id: data.type === 'change_room' ? data.requested_room_type_id : null,
-      }));
-      return { id: request.id, status: request.status, message: 'Đã gửi yêu cầu. Nhân viên sẽ kiểm tra tình trạng phòng và chi phí trước khi xử lý.' };
+        ...(refund ? { refund_id: refund.id } : {}) };
+      booking.checkout_data = { ...booking.checkout_data, requests: [...rows, request] };
+      await manager.getRepository(Booking).save(booking);
+      return { id: request.id, status: request.status, message: 'Đã gửi yêu cầu. Admin sẽ duyệt hoặc từ chối và phản hồi tại đơn này.' };
     });
   }
 
@@ -107,25 +127,55 @@ export class CustomerManagementService {
   }
 
   async staffRequests(staff: StaffContext) {
-    const query = this.db.getRepository(BookingRequest).createQueryBuilder('r')
-      .innerJoinAndSelect('r.booking', 'booking').innerJoinAndSelect('r.customer', 'customer')
-      .addSelect("CASE WHEN r.status = 'pending' THEN 0 WHEN r.status = 'reviewing' THEN 1 ELSE 2 END", 'request_priority')
-      .orderBy('request_priority', 'ASC').addOrderBy('r.created_at', 'DESC').take(100);
-    if (staff.apartmentId) query.andWhere('booking.apartment_id = :branch', { branch: staff.apartmentId });
-    return (await query.getMany()).map(r => ({ ...r, booking: undefined, customer: undefined, booking_code: r.booking.booking_code, customer_name: r.customer.full_name }));
+    const query = this.db.getRepository(Booking).createQueryBuilder('b').innerJoinAndSelect('b.customer', 'customer')
+      .where("JSON_LENGTH(b.checkout_data, '$.requests') > 0");
+    if (staff.apartmentId) query.andWhere('b.apartment_id = :branch', { branch: staff.apartmentId });
+    const bookings = await query.getMany();
+    const refunds = bookings.length ? await this.db.getRepository(Refund).find({ where: bookings.map(b => ({ booking_id: b.id })) }) : [];
+    return bookings.flatMap(b => (b.checkout_data.requests || []).map(row => ({ ...this.requestView(row, refunds), booking_code: b.booking_code, customer_name: b.customer.full_name })))
+      .sort((a, b) => Number(!['pending', 'reviewing'].includes(a.status)) - Number(!['pending', 'reviewing'].includes(b.status)) || b.id - a.id).slice(0, 100);
   }
 
   async reviewRequest(staff: StaffContext, id: number, data: ReviewCustomerRequestDto) {
+    if (staff.role !== 'admin') throw new ForbiddenException('Chỉ admin được duyệt hoặc từ chối yêu cầu hủy/hoàn.');
     return this.db.transaction(async manager => {
-      const row = await manager.getRepository(BookingRequest).findOne({ where: { id }, lock: { mode: 'pessimistic_write' } });
-      if (!row) throw new NotFoundException('Không tìm thấy yêu cầu.');
-      const booking = await manager.getRepository(Booking).findOneBy({ id: row.booking_id });
+      const log = await manager.getRepository(AuditLog).findOneBy({ id, action: 'CUSTOMER_BOOKING_REQUEST', entity_type: 'BOOKINGS' });
+      if (!log) throw new NotFoundException('Không tìm thấy yêu cầu.');
+      const booking = await manager.getRepository(Booking).findOne({ where: { id: log.entity_id }, lock: { mode: 'pessimistic_write' } });
       if (!booking || (staff.apartmentId && booking.apartment_id !== staff.apartmentId)) throw new NotFoundException('Không tìm thấy yêu cầu.');
-      if (['resolved', 'rejected'].includes(row.status)) throw new ConflictException('Yêu cầu đã được kết thúc.');
-      row.status = data.status; row.staff_reply = data.staff_reply; row.handled_by = staff.actor; row.handled_at = new Date();
-      await manager.getRepository(BookingRequest).save(row);
-      await manager.getRepository(AuditLog).save({ actor: staff.actor, action: 'REVIEW_CUSTOMER_REQUEST', entity_type: 'booking_requests', entity_id: id, new_value: JSON.stringify({ status: row.status }) });
-      return { message: 'Đã cập nhật phản hồi yêu cầu. Trạng thái booking và giao dịch được xử lý tại nghiệp vụ tương ứng.' };
+      const rows = booking.checkout_data?.requests || [];
+      const row = rows.find(r => r.id === id);
+      if (!row) throw new NotFoundException('Không tìm thấy yêu cầu.');
+      if (!['pending', 'reviewing'].includes(row.status)) throw new ConflictException('Yêu cầu đã được kết thúc.');
+      if (['cancel', 'refund'].includes(row.type) && data.status === 'resolved') throw new BadRequestException('Vui lòng chọn duyệt hoặc từ chối yêu cầu.');
+      if (!['cancel', 'refund'].includes(row.type) && data.status === 'approved') throw new BadRequestException('Đổi phòng/gia hạn cần thực hiện nghiệp vụ riêng trước khi phản hồi.');
+      if (row.type === 'refund') {
+        let refund = row.refund_id ? await manager.getRepository(Refund).findOneBy({ id: row.refund_id, booking_id: booking.id }) : null;
+        if (!refund && data.status !== 'rejected') { refund = await this.refundRequest(manager, booking.id, row.reason); row.refund_id = refund.id; }
+        if (refund) {
+          if (refund.status !== 'requested') throw new ConflictException('Yêu cầu hoàn tiền đã được xử lý.');
+          if (data.status === 'approved') {
+            const payments = await manager.getRepository(Payment).findBy({ booking_id: booking.id });
+            const transactions = await manager.getRepository(Transaction).findBy({ booking_id: booking.id });
+            const refunds = await manager.getRepository(Refund).findBy({ booking_id: booking.id });
+            const reserved = refunds.filter(r => r.id !== refund.id && ['requested', 'approved'].includes(r.status)).reduce((n, r) => n + Number(r.refund_amount), 0);
+            if (Number(refund.refund_amount) > customerNetPaid(payments, transactions, refunds) - reserved) throw new ConflictException('Số tiền còn có thể hoàn đã thay đổi. Cần kiểm tra lại giao dịch.');
+          }
+          if (data.status === 'approved' || data.status === 'rejected') { refund.status = data.status; await manager.getRepository(Refund).save(refund); }
+        }
+      }
+      if (row.type === 'cancel' && data.status === 'approved') {
+        if (!['draft', 'pending_payment', 'confirmed'].includes(booking.booking_status) || booking.booked_start_time <= new Date()) throw new ConflictException('Đơn không còn đủ điều kiện hủy trước giờ nhận phòng.');
+        booking.booking_status = BookingStatus.CANCELLED; booking.cancel_reason = row.reason; booking.cancelled_at = new Date(); booking.cancelled_by = staff.staffId || null; booking.hold_expires_at = null;
+        await manager.getRepository(BookingRoom).update({ bookings_id: booking.id }, { room_id: null });
+        await manager.getRepository(LockPin).update({ booking_id: booking.id }, { status: 'revoked' });
+      }
+      const previous = { ...row };
+      row.status = data.status; row.staff_reply = data.staff_reply; row.handled_by = staff.actor; row.handled_at = new Date().toISOString();
+      booking.checkout_data = { ...booking.checkout_data, requests: rows };
+      await manager.getRepository(Booking).save(booking);
+      await manager.getRepository(AuditLog).save({ actor: staff.actor, action: 'REVIEW_CUSTOMER_REQUEST', entity_type: 'BOOKINGS', entity_id: booking.id, old_value: JSON.stringify(previous), new_value: JSON.stringify(row) });
+      return { message: data.status === 'approved' ? (row.type === 'cancel' ? 'Đã duyệt hủy đơn. Hoàn tiền (nếu có) được xử lý riêng.' : 'Đã duyệt yêu cầu hoàn tiền, chưa ghi nhận tiền đã chuyển trả.') : 'Đã cập nhật phản hồi cho khách.' };
     });
   }
 }

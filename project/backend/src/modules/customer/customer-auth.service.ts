@@ -9,7 +9,7 @@ import { Customer } from '../../entities/user.entity';
 
 const VERIFY = `
 local raw = redis.call('GET', KEYS[1])
-if not raw then return 0 end
+if not raw then return -1 end
 local record = cjson.decode(raw)
 record.attempts = record.attempts + 1
 if record.hash == ARGV[1] then redis.call('DEL', KEYS[1]); return 1 end
@@ -69,7 +69,8 @@ export class CustomerAuthService implements OnModuleDestroy {
   async verifyOtp(emailInput: string, purpose: 'lookup' | 'booking', code: string) {
     const email = this.normalize(emailInput);
     const valid = await this.storage(() => this.redis.eval(VERIFY, 1, this.key(email, purpose), this.digest(`${email}:${purpose}:${code}`)));
-    if (Number(valid) !== 1) throw new UnauthorizedException('Mã không đúng, đã hết hạn hoặc đã được sử dụng.');
+    if (Number(valid) === -1) throw new UnauthorizedException('Mã đã hết hạn, đã được sử dụng hoặc không còn hiệu lực. Vui lòng gửi mã mới.');
+    if (Number(valid) !== 1) throw new UnauthorizedException('Mã chưa khớp. Hãy kiểm tra mã tra cứu trong email mới nhất.');
     const repo = this.db.getRepository(Customer);
     let customer = await repo.findOne({ where: { email } });
     if (!customer && purpose === 'booking') {
@@ -77,7 +78,10 @@ export class CustomerAuthService implements OnModuleDestroy {
       await repo.createQueryBuilder().insert().values({ email, full_name: email.split('@')[0] }).orIgnore().updateEntity(false).execute();
       customer = await repo.findOne({ where: { email } });
     }
-    if (!customer) throw new BadRequestException('Chưa tìm thấy booking với email này. Bạn có thể đăng nhập hoặc đặt phòng mới.');
+    if (!customer) return {
+      verified: true, has_bookings: false, customer: null, scope: 'lookup' as const,
+      message: 'Xác thực email thành công. Chưa tìm thấy đặt phòng với email này. Hãy kiểm tra email đã dùng khi đặt phòng.',
+    };
     if (customer.is_blocked || customer.is_hidden) throw new UnauthorizedException('Tài khoản không khả dụng. Vui lòng liên hệ hỗ trợ.');
     return this.issueSession(customer, 'lookup');
   }

@@ -1,10 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import axios from 'axios';
 import { Button } from '../components/ui/Button';
 import { Badge } from '../components/ui/Badge';
 import { FixedTopBookingBar } from '../components/ui/FixedTopBookingBar';
-import { customerService, customerError } from '../services/customerService';
-import { getCustomerToken } from '../services/customerSession';
 import {
   BookingDraft,
   BookingGuestSlot,
@@ -12,17 +9,21 @@ import {
   PAYMENT_METHODS,
   SEED_VOUCHERS,
 } from '../services/dataService';
+import { customerService, customerError } from '../services/customerService';
+import { getCustomerToken } from '../services/customerSession';
 
 interface CheckoutPageProps {
   bookingData?: BookingDraft | any;
   onGoBack: () => void;
   onCompleteBooking: () => void;
+  onDraftChange?: (draft: BookingDraft) => void;
 }
 
 export const CheckoutPage: React.FC<CheckoutPageProps> = ({
   bookingData,
   onGoBack,
   onCompleteBooking,
+  onDraftChange,
 }) => {
   const fallbackDraft: BookingDraft = {
     id: 'draft_default',
@@ -126,7 +127,7 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({
     if (currentDraft.guests && currentDraft.guests.length > 0) {
       initialSlots = currentDraft.guests.map((g) => ({ ...g }));
     } else {
-      initialSlots = fallbackDraft.guests.map((g) => ({ ...g }));
+      initialSlots = [];
     }
 
     const requiredAdults = Math.max(1, currentDraft.num_adults || 1);
@@ -179,12 +180,12 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({
 
   // Giai đoạn hiện tại (không dùng số bước 3, 4, 5... trên giao diện)
   type Stage = 'booker' | 'guests' | 'payment' | 'confirmed';
-  const [currentStage, setCurrentStage] = useState<Stage>('booker');
+  const [currentStage, setCurrentStage] = useState<Stage>(bookingData?.resume_stage || 'booker');
 
   // Thông tin người đặt
-  const [bookerName, setBookerName] = useState(getCustomerToken() ? '' : draft.booker.full_name || '');
-  const [bookerEmail, setBookerEmail] = useState(getCustomerToken() ? '' : draft.booker.email || '');
-  const [bookerPhone, setBookerPhone] = useState(getCustomerToken() ? '' : draft.booker.phone || '');
+  const [bookerName, setBookerName] = useState(draft.booker.full_name || '');
+  const [bookerEmail, setBookerEmail] = useState(draft.booker.email || '');
+  const [bookerPhone, setBookerPhone] = useState(draft.booker.phone || '');
   const [isStaying, setIsStaying] = useState(draft.booker.is_staying ?? true);
   const [lockEmail, setLockEmail] = useState(draft.booker.lock_email || '');
   const [consentDataProtection, setConsentDataProtection] = useState(
@@ -195,38 +196,36 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({
   const [otpSent, setOtpSent] = useState(false);
   const [otpCode, setOtpCode] = useState('');
   const [emailVerified, setEmailVerified] = useState(false);
+  const [bookingScope, setBookingScope] = useState<'account' | 'lookup'>(bookingData?.customer_scope || 'lookup');
   const [otpError, setOtpError] = useState<string | null>(null);
+  const [savingBooker, setSavingBooker] = useState(false);
   const [bookerError, setBookerError] = useState<string | null>(null);
-  const [profileLoading, setProfileLoading] = useState(Boolean(getCustomerToken()));
-  const [profileError, setProfileError] = useState<string | null>(null);
-  const [profileRetry, setProfileRetry] = useState(0);
 
   useEffect(() => {
-    if (!getCustomerToken()) return;
+    const scope = bookingData?.customer_scope || (getCustomerToken('account') ? 'account' : 'lookup');
+    if (!getCustomerToken(scope)) return;
     let active = true;
-    setProfileLoading(true);
-    setProfileError(null);
-    customerService.me().then(({ customer }) => {
-      if (!active) return;
-      setBookerName(customer.full_name || '');
-      setBookerEmail(customer.email);
-      setBookerPhone(customer.phone || '');
-      setEmailVerified(true);
-      setOtpSent(false);
-      setOtpCode('');
-    }).catch(error => {
-      if (!active) return;
-      if (axios.isAxiosError(error) && error.response?.status === 401) {
-        setEmailVerified(false);
-      } else {
-        setProfileError(customerError(error));
-      }
-    }).finally(() => { if (active) setProfileLoading(false); });
+    customerService.me(scope).then(({ customer }) => {
+      if (active && (!bookingData?.server_booking_id || customer.email.toLowerCase() === bookingData.booker?.email?.toLowerCase())) { if (!bookingData?.server_booking_id) { setBookerName(customer.full_name); setBookerEmail(customer.email); setBookerPhone(customer.phone || ''); } setBookingScope(scope); setEmailVerified(true); }
+    }).catch(() => { if (active) setEmailVerified(false); });
     return () => { active = false; };
-  }, [profileRetry]);
+  }, []);
 
   // Danh sách slot người đi cùng (khởi tạo đầy đủ cả người lớn và trẻ em)
   const [slots, setSlots] = useState<BookingGuestSlot[]>(() => buildInitialSlots(draft));
+
+  const [guestDraftNotice, setGuestDraftNotice] = useState('');
+  useEffect(() => {
+    if (!draft.server_booking_id || currentStage !== 'guests' || draft.status !== 'pending_info') return;
+    let active = true;
+    setGuestDraftNotice('Đang lưu thông tin…');
+    const timer = window.setTimeout(() => {
+      customerService.saveGuestDraft(draft.server_booking_id!, slots.map(g => ({ full_name: g.full_name, date_of_birth: g.date_of_birth, guest_type: g.guest_type, is_booker: g.is_booker, is_foreigner: g.is_foreigner, id_type: g.id_type, id_number: g.id_number, slot_status: g.slot_status })), bookingScope)
+        .then(() => { if (active) setGuestDraftNotice('Đã lưu thông tin người ở.'); })
+        .catch(error => { if (active) setGuestDraftNotice(customerError(error)); });
+    }, 500);
+    return () => { active = false; window.clearTimeout(timer); };
+  }, [draft.server_booking_id, currentStage, slots, bookingScope, draft.status]);
 
   // Đồng bộ lại slots và draft nếu bookingData thay đổi
   useEffect(() => {
@@ -276,30 +275,20 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({
 
   // Xử lý gửi và xác thực OTP
   const handleSendOtp = async () => {
-    if (!bookerEmail || !bookerEmail.includes('@')) {
-      setBookerError('Vui lòng nhập địa chỉ Email hợp lệ trước khi gửi mã xác thực.');
-      return;
-    }
     setOtpError(null);
-    setBookerError(null);
     try { await customerService.requestOtp(bookerEmail, 'booking'); setOtpSent(true); }
     catch (error) { setOtpError(customerError(error)); }
   };
-
   const handleVerifyOtp = async () => {
-    try {
-      await customerService.verifyOtp(bookerEmail, 'booking', otpCode);
-      setEmailVerified(true);
-      setOtpError(null);
-    } catch (error) {
-      setOtpError(customerError(error));
-    }
+    setOtpError(null);
+    try { await customerService.verifyOtp(bookerEmail, 'booking', otpCode); setBookingScope('lookup'); setEmailVerified(true); }
+    catch (error) { setOtpError(customerError(error)); }
   };
 
   // Xác nhận thông tin người đặt
-  const handleBookerSubmit = (e: React.FormEvent) => {
+  const handleBookerSubmit = async (e: React.FormEvent) => {
+    if (savingBooker) return;
     e.preventDefault();
-    if (profileLoading || profileError) return;
     setBookerError(null);
 
     if (!bookerName.trim()) {
@@ -325,20 +314,22 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({
       return;
     }
 
-    setDraft((prev) => ({
-      ...prev,
-      booker: {
-        full_name: bookerName,
-        email: bookerEmail,
-        phone: bookerPhone,
-        is_staying: isStaying,
-        email_verified: emailVerified,
-        consent_data_protection: consentDataProtection,
-      },
-    }));
+    if (!emailVerified) {
+      setBookerError('Vui lòng xác thực email bằng OTP trước khi tiếp tục. Nếu đã có tài khoản, bạn có thể đăng nhập tại mục Tra cứu.');
+      return;
+    }
 
-    setCurrentStage('guests');
-    window.scrollTo({ top: 0, behavior: 'smooth' });
+    setSavingBooker(true);
+    try {
+      const selected = draft.booking_rooms?.length ? draft.booking_rooms.map(r => ({ room_type_id: r.room_type_id, quantity: r.count })) : [{ room_type_id: draft.room_type_id, quantity: draft.num_rooms || 1 }];
+      const saved = draft.server_booking_id
+        ? await customerService.updateBooker(draft.server_booking_id, { full_name: bookerName, phone: bookerPhone.replace(/[\s.-]/g, ''), is_staying: isStaying }, bookingScope)
+        : await customerService.startDraft({ email: bookerEmail, full_name: bookerName, phone: bookerPhone.replace(/[\s.-]/g, ''), is_staying: isStaying, selected_rooms: selected, stay_type: draft.stay_type || 'fullday', adults: draft.num_adults, children: draft.num_children, check_in_date: draft.check_in_date, check_out_date: draft.check_out_date }, bookingScope);
+      const next: BookingDraft = { ...draft, server_booking_id: saved.booking_id, booking_code: saved.booking_code, total_price: saved.total_price, room_subtotal: saved.total_price, hold_expires_at: Date.parse(saved.hold_expires_at), customer_scope: bookingScope, resume_stage: 'guests', booker: { full_name: bookerName, email: bookerEmail, phone: bookerPhone, is_staying: isStaying, email_verified: true, consent_data_protection: consentDataProtection }, guests: slots };
+      setDraft(next); onDraftChange?.(next);
+      setCurrentStage('guests'); window.scrollTo({ top: 0, behavior: 'smooth' });
+    } catch (error) { setBookerError(customerError(error)); }
+    finally { setSavingBooker(false); }
   };
 
   // Chỉ tải 1 ảnh mặt trước CCCD lên từ file, không chụp camera (Yêu cầu 5)
@@ -566,12 +557,17 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({
     return true;
   };
 
-  const handleGuestsSubmit = () => {
-    if (validateGuestsStage()) {
-      setDraft((prev) => ({ ...prev, guests: slots, status: 'pending_payment' }));
-      setCurrentStage('payment');
-      window.scrollTo({ top: 0, behavior: 'smooth' });
-    }
+  const [savingGuests, setSavingGuests] = useState(false);
+  const handleGuestsSubmit = async () => {
+    if (savingGuests || !validateGuestsStage()) return;
+    if (!draft.server_booking_id) { setGuestsError('Vui lòng quay lại bước người đặt để lưu đơn trước.'); return; }
+    setSavingGuests(true);
+    try {
+      const saved = await customerService.completeCheckout(draft.server_booking_id, slots.map(g => ({ full_name: g.full_name, date_of_birth: g.date_of_birth, guest_type: g.guest_type, is_booker: g.is_booker, is_foreigner: g.is_foreigner, id_type: g.id_type, id_number: g.id_number })), bookingScope);
+      const next: BookingDraft = { ...draft, guests: slots, status: 'pending_payment', resume_stage: 'payment', total_price: saved.total_price };
+      setDraft(next); onDraftChange?.(next); setCurrentStage('payment'); window.scrollTo({ top: 0, behavior: 'smooth' });
+    } catch (error) { setGuestsError(customerError(error)); }
+    finally { setSavingGuests(false); }
   };
 
   // Áp dụng voucher
@@ -608,39 +604,112 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({
   const [saveError, setSaveError] = useState('');
   const [savedBooking, setSavedBooking] = useState<{ booking_code: string; total_price: number; hold_expires_at: string } | null>(null);
   const handleFinishPayment = async () => {
-    setIsProcessingPayment(true);
-    setSaveError('');
+    if (isProcessingPayment || !draft.server_booking_id) return;
+    setIsProcessingPayment(true); setSaveError('');
     try {
-      if (draft.booking_rooms && draft.booking_rooms.length > 1) {
-        setSaveError('Luồng lưu đơn hiện hỗ trợ một loại phòng mỗi lần. Vui lòng tách thành các đơn riêng.');
-        return;
-      }
-      const selected = draft.booking_rooms?.[0];
-      const saved = await customerService.createGuestBooking({
-        email: bookerEmail, full_name: bookerName, phone: bookerPhone,
-        room_type_id: Number(selected?.room_type_id || draft.room_type_id),
-        num_rooms: Number(selected?.count || draft.num_rooms || 1),
-        adults: draft.num_adults, children: draft.num_children,
-        check_in_date: draft.check_in_date, check_out_date: draft.check_out_date,
-      });
-      setSavedBooking(saved);
-      setCurrentStage('confirmed');
-      window.scrollTo({ top: 0, behavior: 'smooth' });
+      await customerService.checkout(draft.server_booking_id, bookingScope);
+      setSavedBooking({ booking_code: draft.booking_code, total_price: draft.total_price, hold_expires_at: new Date(draft.hold_expires_at).toISOString() });
+      setCurrentStage('confirmed'); window.scrollTo({ top: 0, behavior: 'smooth' });
     } catch (error) { setSaveError(customerError(error)); }
     finally { setIsProcessingPayment(false); }
   };
 
   // MÀN HÌNH XÁC NHẬN ĐẶT PHÒNG THÀNH CÔNG
-  if (currentStage === 'confirmed' && savedBooking) {
-    return <div className="max-w-2xl mx-auto px-6 py-16 space-y-5">
-      <h1 className="text-3xl font-serif">Đã lưu đơn đặt phòng</h1>
-      <p>Mã booking: <strong>{savedBooking.booking_code}</strong></p>
-      <p>Đơn đang chờ thanh toán. Chưa phát sinh giao dịch hoặc cấp mã khóa.</p>
-      <p>Tổng tiền phòng do máy chủ tính: <strong>{savedBooking.total_price.toLocaleString('vi-VN')}đ</strong>.</p>
-      <p>Giữ phòng đến {new Date(savedBooking.hold_expires_at).toLocaleString('vi-VN')}.</p>
-      <p>Dùng email <strong>{bookerEmail}</strong> và OTP để xem lại đơn.</p>
-      <Button onClick={onCompleteBooking}>Xem booking của tôi</Button>
-    </div>;
+  if (currentStage === 'confirmed') {
+    return (
+      <div className="bg-[#F8F6F0] min-h-screen py-16 px-4 font-sans">
+        <div className="max-w-2xl mx-auto bg-white rounded-2xl p-8 border border-[#E2DDD5] shadow-lg text-center space-y-6">
+          <div className="w-16 h-16 bg-[#EDF5F1] text-[#2A694E] rounded-full flex items-center justify-center mx-auto text-2xl font-bold">
+            ✓
+          </div>
+
+          <div>
+            <h1 className="text-2xl sm:text-3xl font-serif font-bold text-[#1A1615]">
+              Đã lưu đơn · Chờ thanh toán
+            </h1>
+            <p className="text-xs text-[#736B63] mt-2 font-mono">
+              Mã đặt phòng: <strong className="text-[#9E472A] text-sm">{draft.booking_code}</strong>
+            </p>
+          </div>
+
+          {/* Hộp Thông Báo TTLock */}
+          <div className="bg-[#1A1615] text-[#F8F6F0] p-6 rounded-xl text-left space-y-3">
+            <div className="flex items-center justify-between border-b border-white/10 pb-2">
+              <span className="text-xs font-semibold uppercase tracking-wider text-amber-200">
+                Khoá Thông Minh TTLock
+              </span>
+              <span className="text-[10px] bg-white/10 text-emerald-300 font-semibold px-2 py-0.5 rounded">
+                Chưa cấp mã
+              </span>
+            </div>
+
+            <p className="text-xs text-white/90 leading-relaxed">
+              Đơn đã lưu theo email <strong>{bookerEmail}</strong>. Bạn có thể tra cứu bằng email + OTP. Mã PIN chỉ hiển thị khi đơn đủ điều kiện thanh toán, xác minh và thời gian lưu trú.
+            </p>
+          </div>
+
+          {/* Tóm tắt */}
+          <div className="bg-[#F8F6F0] p-5 rounded-xl border border-[#E2DDD5] text-xs text-left space-y-2">
+            <div className="flex justify-between py-1 border-b border-[#E2DDD5]">
+              <span className="text-[#736B63]">Chi nhánh:</span>
+              <strong className="text-[#1A1615]">{draft.apartment_name}</strong>
+            </div>
+            <div className="flex justify-between py-1 border-b border-[#E2DDD5]">
+               <span className="text-[#736B63]">Phòng đã chọn:</span>
+               <strong className="text-[#1A1615] text-right max-w-[60%]">
+                 {draft.booking_rooms && draft.booking_rooms.length > 0
+                   ? draft.booking_rooms.map(br => `${br.room_type_name} x${br.count}`).join(', ')
+                   : `${draft.room_type_name} (${draft.num_rooms} phòng)`
+                 }
+               </strong>
+             </div>
+            <div className="flex justify-between py-1 border-b border-[#E2DDD5]">
+              <span className="text-[#736B63]">Thời gian:</span>
+              <strong className="text-[#1A1615]">
+                {draft.check_in_date} — {draft.check_out_date}
+              </strong>
+            </div>
+            <div className="flex justify-between py-1 border-b border-[#E2DDD5]">
+              <span className="text-[#736B63]">Tổng thanh toán:</span>
+              <strong className="text-[#9E472A] text-sm">
+                {(savedBooking?.total_price ?? finalTotalAmount).toLocaleString('vi-VN')}đ
+              </strong>
+            </div>
+
+            {/* Danh sách thành viên */}
+            <div className="pt-2">
+              <span className="text-[11px] font-bold text-[#736B63] uppercase block mb-1">
+                Thành viên lưu trú ({slots.length} người):
+              </span>
+              <div className="space-y-1">
+                {slots.map((s, idx) => (
+                  <div
+                    key={s.id}
+                    className="flex items-center justify-between bg-white px-3 py-1.5 rounded border border-[#E2DDD5]"
+                  >
+                    <span className="font-medium text-[#1A1615]">
+                      {idx + 1}. {s.full_name} ({s.guest_type === 'adult' ? 'Người lớn' : `Trẻ em ${s.age || ''}t`})
+                    </span>
+                    <span className="text-[11px] text-[#2A694E] font-medium">
+                      Đã xác thực ({s.id_number || 'Khai sinh'})
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          <div className="flex items-center justify-center gap-4 pt-2">
+            <Button variant="primary" onClick={onCompleteBooking}>
+              Xem trong đơn đặt phòng
+            </Button>
+            <Button variant="ghost" onClick={onGoBack}>
+              Về trang chủ
+            </Button>
+          </div>
+        </div>
+      </div>
+    );
   }
 
   return (
@@ -737,13 +806,7 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({
                   </div>
                 )}
 
-                {profileLoading && <p role="status" className="text-xs">Đang tải thông tin tài khoản…</p>}
-                {profileError && <div role="alert" className="text-xs text-[#A83232]">
-                  {profileError}{' '}
-                  <button type="button" onClick={() => setProfileRetry(n => n + 1)} className="underline">Thử lại</button>
-                </div>}
-                <form onSubmit={handleBookerSubmit} className="space-y-5">
-                  <fieldset disabled={profileLoading || Boolean(profileError)} className="space-y-5">
+                <form onSubmit={handleBookerSubmit} aria-busy={savingBooker} className="space-y-5">
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div>
                       <label className="text-xs font-bold text-[#1A1615] block mb-1">
@@ -753,7 +816,7 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({
                         type="text"
                         value={bookerName}
                         onChange={(e) => setBookerName(e.target.value)}
-                        placeholder="Nhập họ và tên của bạn"
+                        placeholder="Ví dụ: Nguyễn Nhật Huy"
                         className="w-full bg-[#F8F6F0] border border-[#D0C8BC] rounded-xl px-3.5 py-2.5 text-xs text-[#1A1615] font-medium outline-none focus:border-[#9E472A]"
                       />
                     </div>
@@ -782,22 +845,21 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({
                         <input
                           type="email"
                           value={bookerEmail}
+                          readOnly={!!draft.server_booking_id}
                           onChange={(e) => {
                             setBookerEmail(e.target.value);
                             setEmailVerified(false);
-                            setOtpSent(false);
-                            setOtpCode('');
                           }}
-                          placeholder="ban@example.com"
+                          placeholder="huy.nguyen@homestay.com"
                           className="flex-1 bg-[#F8F6F0] border border-[#D0C8BC] rounded-xl px-3.5 py-2.5 text-xs text-[#1A1615] font-medium outline-none focus:border-[#9E472A]"
                         />
-                        {!emailVerified && <button
+                        <button
                           type="button"
                           onClick={handleSendOtp}
                           className="bg-[#1A1615] hover:bg-black text-white px-4 py-2 rounded-xl text-xs font-semibold shrink-0 transition-colors cursor-pointer"
                         >
                           {otpSent ? 'Gửi lại mã OTP' : 'Gửi mã OTP'}
-                        </button>}
+                        </button>
                       </div>
 
                       {otpSent && !emailVerified && (
@@ -805,7 +867,7 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({
                           <div>
                             <span className="font-bold text-[#1A1615] block">Mã xác thực 6 số</span>
                             <span className="text-[10px] text-[#736B63]">
-                              Mã OTP đã gửi đến {bookerEmail}, có hiệu lực 5 phút.
+                              Mã OTP đã gửi đến {bookerEmail} (Mã thử nghiệm: <strong>123456</strong>)
                             </span>
                           </div>
                           <div className="flex items-center gap-2">
@@ -921,16 +983,16 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({
                     </label>
                   </div>
 
+                  <p className="text-xs text-[#736B63]">Nhấn Tiếp tục để lưu đơn giữ chỗ. Sau đó bạn có thể mở lại đơn tại Tra cứu trong thời gian giữ phòng.</p>
                   {/* Nút tiếp tục (không ghi số bước) */}
                   <div className="pt-4 flex items-center justify-between border-t border-[#EBE6DE]">
                     <Button variant="ghost" type="button" onClick={onGoBack}>
-                      ← Quay lại chọn phòng
+                      {draft.server_booking_id ? '← Quay lại danh sách đơn' : '← Quay lại chọn phòng'}
                     </Button>
-                    <Button variant="primary" type="submit" className="font-semibold">
-                      Tiếp tục: Điền thông tin người đi cùng ({slots.length} người) →
+                    <Button variant="primary" type="submit" disabled={savingBooker} className="font-semibold">
+                      {savingBooker ? 'Đang lưu đơn giữ chỗ…' : `Tiếp tục: Điền thông tin người đi cùng (${slots.length} người) →`}
                     </Button>
                   </div>
-                  </fieldset>
                 </form>
               </div>
             )}
@@ -949,8 +1011,8 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({
                     <p className="text-xs text-[#736B63] mt-1 font-medium">
                       Đoàn của bạn:{' '}
                       <span className="text-[#1A1615] font-bold">
-                        {draft.num_adults} người lớn
-                        {draft.num_children > 0 ? `, ${draft.num_children} trẻ em (< 10 tuổi)` : ''}
+                        {draft.num_adults} người lớn (≥ 15 tuổi)
+                        {draft.num_children > 0 ? `, ${draft.num_children} trẻ em (< 15 tuổi)` : ''}
                       </span>{' '}
                       ({slots.length} thành viên)
                     </p>
@@ -961,10 +1023,11 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({
                     onClick={onGoBack}
                     className="text-xs font-semibold text-[#9E472A] hover:underline shrink-0"
                   >
-                    Sửa số khách (quay về chọn phòng)
+                    {draft.server_booking_id ? 'Quay lại danh sách đơn' : 'Sửa số khách (quay về chọn phòng)'}
                   </button>
                 </div>
 
+                <p className="text-xs text-[#736B63]" role="status">{guestDraftNotice} Ảnh giấy tờ chỉ được xem trước trong lần nhập này; thông tin người ở được lưu để tiếp tục đơn.</p>
                 {guestsError && (
                   <div className="p-3 bg-[#FDF2F2] border border-[#F3CECE] text-[#A83232] text-xs rounded-xl flex items-center justify-between">
                     <span>{guestsError}</span>
@@ -1314,6 +1377,7 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({
                     variant="primary"
                     type="button"
                     onClick={handleGuestsSubmit}
+                      disabled={savingGuests}
                     className="font-semibold"
                   >
                     Tiếp tục: Thanh toán →
@@ -1377,7 +1441,7 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({
                             <div className="w-36 h-36 bg-[#1A1615] text-white flex flex-col items-center justify-center rounded-lg p-2 text-center">
                               <span className="text-xs font-mono text-white/80">VIETQR PAY</span>
                               <span className="text-sm font-bold text-amber-300 mt-2">
-                                {finalTotalAmount.toLocaleString('vi-VN')}đ
+                                {(savedBooking?.total_price ?? finalTotalAmount).toLocaleString('vi-VN')}đ
                               </span>
                             </div>
                             <span className="text-[10px] text-[#736B63] mt-2 font-mono">
@@ -1401,7 +1465,7 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({
                             <div className="flex justify-between py-1 border-b border-[#EBE6DE]">
                               <span className="text-[#736B63]">Số tiền:</span>
                               <strong className="text-[#9E472A] font-mono font-bold text-sm">
-                                {finalTotalAmount.toLocaleString('vi-VN')}đ
+                                {(savedBooking?.total_price ?? finalTotalAmount).toLocaleString('vi-VN')}đ
                               </strong>
                             </div>
                           </div>
@@ -1462,27 +1526,27 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({
                     </div>
                   </div>
 
-                  {/* Nút thanh toán (không ghi số bước) */}
+                  {saveError && <p role="alert" className="text-sm text-red-700">{saveError}</p>}
+                  <p className="text-xs text-[#736B63]">Đơn đã được lưu trong hệ thống và có thể mở lại tại Tra cứu trong thời gian giữ chỗ. Giá phòng được xác nhận từ máy chủ khi lưu; bước này chưa ghi nhận thanh toán hay áp dụng dịch vụ và ưu đãi mô phỏng.</p>
+                  {/* Lưu đơn thực tế, không tự đánh dấu thanh toán thành công. */}
                   <div className="pt-4 flex items-center justify-between border-t border-[#EBE6DE]">
                     <Button variant="ghost" type="button" onClick={() => setCurrentStage('guests')}>
                       ← Quay lại danh sách người đi cùng
                     </Button>
-                    {saveError && <p role="alert" className="text-red-700 text-sm mb-3">{saveError}</p>}
-                    <p className="text-sm text-stone-600">Lưu đơn chờ thanh toán theo giá phòng của máy chủ. Voucher, phụ phí và thanh toán trực tuyến chưa áp dụng trong luồng này.</p>
                     <Button
                       variant="primary"
                       type="button"
-                      disabled={isProcessingPayment || savedBooking !== null}
+                      disabled={isProcessingPayment}
                       onClick={handleFinishPayment}
                       className="font-semibold"
                     >
                       {isProcessingPayment ? (
                         <span className="flex items-center gap-2">
                           <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
-                          Đang lưu booking...
+                          Đang lưu đơn...
                         </span>
                       ) : (
-                        'Lưu booking chờ thanh toán'
+                        'Xem đơn chờ thanh toán'
                       )}
                     </Button>
                   </div>
@@ -1624,7 +1688,7 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({
                   <span className="text-[10px] text-[#736B63]">Đã bao gồm VAT & phụ thu</span>
                 </div>
                 <span className="text-xl font-serif font-bold text-[#9E472A]">
-                  {finalTotalAmount.toLocaleString('vi-VN')}đ
+                  {(savedBooking?.total_price ?? finalTotalAmount).toLocaleString('vi-VN')}đ
                 </span>
               </div>
             </div>

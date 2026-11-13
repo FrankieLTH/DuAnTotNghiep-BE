@@ -168,11 +168,20 @@ export class Booking {
   @Column({ type: 'enum', enum: BookingType, default: BookingType.OVERNIGHT })
   booking_type: BookingType;
 
+  @Column({ nullable: true })
+  stay_type: string;
+
   @Column({ type: 'datetime' })
   booked_start_time: Date;
 
+  @Column({ type: 'datetime', nullable: true })
+  start_at: Date;
+
   @Column({ type: 'datetime' })
   booked_end_time: Date;
+
+  @Column({ type: 'datetime', nullable: true })
+  end_at: Date;
 
   @Column({ type: 'datetime', nullable: true })
   check_in_actual: Date;
@@ -222,6 +231,9 @@ export class Booking {
 
   @Column({ type: 'text', nullable: true })
   note: string;
+
+  @Column({ type: 'json', nullable: true })
+  checkout_data: { booker?: { full_name: string; email: string; phone: string; is_staying: boolean; consent_data_protection: boolean }; guests?: any[]; requests?: any[] };
 
   @Column({ type: 'text', nullable: true })
   cancel_reason: string;
@@ -356,6 +368,9 @@ export class BookingRoom {
   @ManyToOne(() => Room, { nullable: true })
   @JoinColumn({ name: 'room_id' })
   room: Room;
+
+  @Column('decimal', { precision: 12, scale: 2, default: 0 })
+  unit_price: number;
 
   @CreateDateColumn()
   created_at: Date;
@@ -527,7 +542,7 @@ export class Refund {
   @PrimaryGeneratedColumn()
   id: number;
 
-  @Column()
+  @Column({ nullable: true })
   payment_id: number;
 
   @Column()
@@ -547,31 +562,6 @@ export class Refund {
 
   @CreateDateColumn()
   created_at: Date;
-}
-
-export type CustomerRequestType = 'cancel' | 'refund' | 'extend' | 'change_room';
-export type CustomerRequestStatus = 'pending' | 'reviewing' | 'resolved' | 'rejected';
-
-@Entity('booking_requests')
-@Index(['booking_id', 'created_at'])
-export class BookingRequest {
-  @PrimaryGeneratedColumn() id: number;
-  @Column() booking_id: number;
-  @ManyToOne(() => Booking, { onDelete: 'CASCADE' })
-  @JoinColumn({ name: 'booking_id' }) booking: Booking;
-  @Column() customer_id: number;
-  @ManyToOne(() => Customer)
-  @JoinColumn({ name: 'customer_id' }) customer: Customer;
-  @Column({ type: 'enum', enum: ['cancel', 'refund', 'extend', 'change_room'] }) type: CustomerRequestType;
-  @Column({ type: 'enum', enum: ['pending', 'reviewing', 'resolved', 'rejected'], default: 'pending' }) status: CustomerRequestStatus;
-  @Column({ type: 'text' }) reason: string;
-  @Column({ type: 'date', nullable: true }) requested_end_date: string;
-  @Column({ type: 'int', nullable: true }) requested_room_type_id: number;
-  @Column({ type: 'text', nullable: true }) staff_reply: string;
-  @Column({ nullable: true }) handled_by: string;
-  @Column({ type: 'datetime', nullable: true }) handled_at: Date;
-  @CreateDateColumn() created_at: Date;
-  @UpdateDateColumn() updated_at: Date;
 }
 
 @Entity('ai_chat_logs')

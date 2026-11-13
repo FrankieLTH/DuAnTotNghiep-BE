@@ -14,5 +14,6 @@ export default defineConfig({
     allowedHosts: ['pipi.hq', 'localhost'],
     port: 80,
     host: true,
+    proxy: { '/api': { target: process.env.VITE_PROXY_TARGET || 'http://127.0.0.1:3000', changeOrigin: true } },
   },
 });

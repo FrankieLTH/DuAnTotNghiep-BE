@@ -7,5 +7,5 @@ import { CustomerGuard } from './customer.guard';
 import { CustomerManagementService } from './customer-management.service';
 import { CustomerAccountService } from './customer-account.service';
 import { CustomerMailService } from './customer-mail.service';
-@Module({ imports: [AuthModule], providers: [CustomerAuthService, CustomerAccountService, CustomerMailService, CustomerBookingsService, CustomerManagementService, CustomerGuard], controllers: [CustomerController] })
+@Module({ imports: [AuthModule], providers: [CustomerAuthService, CustomerAccountService, CustomerMailService, CustomerBookingsService, CustomerManagementService, CustomerGuard], controllers: [CustomerController], exports: [CustomerGuard, CustomerAuthService, CustomerManagementService] })
 export class CustomerModule {}

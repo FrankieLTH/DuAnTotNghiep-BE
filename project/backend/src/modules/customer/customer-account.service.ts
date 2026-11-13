@@ -94,19 +94,23 @@ export class CustomerAccountService {
   async resendVerification(emailInput: string, ip: string) {
     const email = this.auth.normalize(emailInput);
     await this.rate('register', email, ip, 5, 3600);
+    const key = this.key('register', email), raw = await this.auth.redis.get(key);
+    if (!raw) throw new BadRequestException({ message: 'Phiên đăng ký không còn hoặc đã hết hạn. Vui lòng nhập lại thông tin để nhận mã xác minh.', next_action: 'register' });
     const cooldown = this.key('register:cooldown', email);
     if (!(await this.auth.redis.set(cooldown, '1', 'EX', 60, 'NX'))) throw new HttpException('Vui lòng đợi 60 giây trước khi gửi lại mã xác minh.', 429);
     const generic = { message: 'Kiểm tra email để nhận mã xác minh mới. Nếu đã có tài khoản, hãy đăng nhập.', retry_after: 60, expires_in: 300 };
-    const key = this.key('register', email), raw = await this.auth.redis.get(key);
-    if (!raw) return generic;
     const customer = await this.find(email);
     if (customer?.password_hash || customer?.is_blocked || customer?.is_hidden) return generic;
     const pending = JSON.parse(raw);
     let challenge = this.makeCode(email, 'register');
     while (challenge.record.code === pending.code) challenge = this.makeCode(email, 'register');
     delete pending.token; Object.assign(pending, challenge.record);
-    await this.auth.redis.set(key, JSON.stringify(pending), 'EX', 1800);
-    try { await this.sendCode(email, 'register', challenge.code); }
+    try {
+      await this.sendCode(email, 'register', challenge.code);
+      // A failed delivery keeps the previous usable code; never recreate a consumed registration.
+      const refreshed = await this.auth.redis.eval("if redis.call('GET',KEYS[1])~=ARGV[1] then return 0 end; redis.call('SET',KEYS[1],ARGV[2],'EX',1800); return 1", 1, key, raw, JSON.stringify(pending));
+      if (!refreshed) throw new BadRequestException({ message: 'Phiên đăng ký vừa thay đổi. Vui lòng đăng nhập hoặc nhập lại thông tin đăng ký.', next_action: 'register' });
+    }
     catch (error) { await this.auth.redis.del(cooldown); throw error; }
     return generic;
   }

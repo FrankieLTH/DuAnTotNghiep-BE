@@ -19,7 +19,6 @@ import {
   Payment,
   Refund,
   AIChatLog,
-  BookingRequest,
 } from './entities/booking.entity';
 
 import { AuthModule } from './modules/auth/auth.module';
@@ -29,8 +28,8 @@ import { PaymentsModule } from './modules/payments/payments.module';
 import { LocksModule } from './modules/locks/locks.module';
 import { AIModule } from './modules/ai/ai.module';
 import { AdminModule } from './modules/admin/admin.module';
-import { CronModule } from './modules/cron/cron.module';
 import { CustomerModule } from './modules/customer/customer.module';
+import { CronModule } from './modules/cron/cron.module';
 
 @Module({
   imports: [
@@ -51,7 +50,7 @@ import { CustomerModule } from './modules/customer/customer.module';
         database: config.get<string>('DB_DATABASE', 'duantotnghiep'),
         entities: [
           Role, User, Staff, Customer, Apartment, RoomType, Room, Amenity, RoomImage, Service,
-          Lock, Voucher, Booking, BookingGuest, BookingRoom, Transaction, AuditLog, LockPin, PaymentMethod, Payment, Refund, AIChatLog, BookingRequest
+          Lock, Voucher, Booking, BookingGuest, BookingRoom, Transaction, AuditLog, LockPin, PaymentMethod, Payment, Refund, AIChatLog
         ],
         synchronize: false, // Dùng schema MySQL có sẵn
         logging: false,

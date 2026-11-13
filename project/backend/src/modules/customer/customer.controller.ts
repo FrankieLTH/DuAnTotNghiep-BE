@@ -2,7 +2,7 @@ import { Body, Controller, Get, Param, ParseIntPipe, Post, Put, Query, Req, UseG
 import { CustomerAuthService } from './customer-auth.service';
 import { CustomerBookingsService } from './customer-bookings.service';
 import { CustomerGuard } from './customer.guard';
-import { CustomerBookingQuery, GuestBookingDto, RequestOtpDto, VerifyOtpDto, UpdateCustomerProfileDto, CustomerBookingRequestDto, RegisterCustomerDto, CustomerLoginDto, CustomerEmailDto, CustomerEmailTokenDto, ResetCustomerPasswordDto, ChangeCustomerPasswordDto, CustomerRegistrationCodeDto, ResetCustomerPasswordCodeDto } from './customer.dto';
+import { CustomerBookingQuery, GuestBookingDto, RequestOtpDto, VerifyOtpDto, UpdateCustomerProfileDto, CustomerBookingRequestDto, RegisterCustomerDto, CustomerLoginDto, CustomerEmailDto, CustomerEmailTokenDto, ResetCustomerPasswordDto, ChangeCustomerPasswordDto, CustomerRegistrationCodeDto, ResetCustomerPasswordCodeDto, CompleteCheckoutDto, CheckoutBookerDto, SaveGuestDraftDto } from './customer.dto';
 import { CustomerAccountService } from './customer-account.service';
 import { CustomerManagementService } from './customer-management.service';
 
@@ -48,11 +48,29 @@ export class CustomerController {
   @UseGuards(CustomerGuard) @Get('bookings/:id/requests')
   requests(@Req() req, @Param('id', ParseIntPipe) id: number) { return this.management.requests(req.customerSession.customer.id, id); }
   @UseGuards(CustomerGuard) @Post('bookings/:id/requests')
-  createRequest(@Req() req, @Param('id', ParseIntPipe) id: number, @Body() body: CustomerBookingRequestDto) { return this.management.createRequest(this.account(req), id, body); }
+  createRequest(@Req() req, @Param('id', ParseIntPipe) id: number, @Body() body: CustomerBookingRequestDto) { return this.management.createRequest(req.customerSession.customer.id, id, body); }
   @UseGuards(CustomerGuard) @Get('bookings/:id/room-options')
-  roomOptions(@Req() req, @Param('id', ParseIntPipe) id: number) { return this.management.roomOptions(this.account(req), id); }
+  roomOptions(@Req() req, @Param('id', ParseIntPipe) id: number) { return this.management.roomOptions(req.customerSession.customer.id, id); }
   @UseGuards(CustomerGuard) @Get('bookings/:id/pins') @Header('Cache-Control', 'no-store')
-  pins(@Req() req, @Param('id', ParseIntPipe) id: number) { return this.management.pins(this.account(req), id); }
-  @Post('guest-bookings')
-  create(@Body() dto: GuestBookingDto) { return this.bookings.createGuestBooking(dto); }
+  pins(@Req() req, @Param('id', ParseIntPipe) id: number) { return this.management.pins(req.customerSession.customer.id, id); }
+  @UseGuards(CustomerGuard) @Post('booking-drafts')
+  createDraft(@Body() dto: GuestBookingDto, @Req() req) {
+    if (dto.email.trim().toLowerCase() !== req.customerSession.customer.email.trim().toLowerCase()) throw new ForbiddenException('Email người đặt chưa được xác thực.');
+    return this.bookings.createGuestBooking(dto, true);
+  }
+  @UseGuards(CustomerGuard) @Post('bookings/:id/resume')
+  resume(@Req() req, @Param('id', ParseIntPipe) id: number) { return this.bookings.resume(req.customerSession.customer.id, id); }
+  @UseGuards(CustomerGuard) @Get('bookings/:id/checkout') @Header('Cache-Control', 'no-store')
+  checkout(@Req() req, @Param('id', ParseIntPipe) id: number) { return this.bookings.checkout(req.customerSession.customer.id, id); }
+  @UseGuards(CustomerGuard) @Put('bookings/:id/checkout/guest-draft')
+  saveGuestDraft(@Req() req, @Param('id', ParseIntPipe) id: number, @Body() dto: SaveGuestDraftDto) { return this.bookings.saveGuestDraft(req.customerSession.customer.id, id, dto); }
+  @UseGuards(CustomerGuard) @Put('bookings/:id/checkout/booker')
+  updateBooker(@Req() req, @Param('id', ParseIntPipe) id: number, @Body() dto: CheckoutBookerDto) { return this.bookings.updateBooker(req.customerSession.customer.id, id, dto); }
+  @UseGuards(CustomerGuard) @Put('bookings/:id/checkout')
+  completeCheckout(@Req() req, @Param('id', ParseIntPipe) id: number, @Body() dto: CompleteCheckoutDto) { return this.bookings.completeCheckout(req.customerSession.customer.id, id, dto); }
+  @UseGuards(CustomerGuard) @Post('guest-bookings')
+  create(@Body() dto: GuestBookingDto, @Req() req) {
+    if (dto.email.trim().toLowerCase() !== req.customerSession.customer.email.trim().toLowerCase()) throw new ForbiddenException('Email người đặt chưa được xác thực.');
+    return this.bookings.createGuestBooking(dto);
+  }
 }
