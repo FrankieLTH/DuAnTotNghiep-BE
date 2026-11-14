@@ -47,7 +47,15 @@ export class AvailabilityService {
         ) AS availableCount
       FROM room_types rt
       JOIN APARTMENT apt ON rt.apartment_id = apt.id
-      JOIN ROOMS r ON r.room_type_id = rt.id AND r.status != 'maintenance' AND r.is_hidden = 0
+      JOIN ROOMS r ON r.room_type_id = rt.id 
+        AND r.is_hidden = 0 
+        AND r.deleted_at IS NULL
+        AND NOT EXISTS (
+          SELECT 1 FROM room_blocks rb 
+          WHERE rb.room_id = r.room_id 
+            AND rb.from_at < ? 
+            AND (rb.to_at IS NULL OR rb.to_at > ?)
+        )
       LEFT JOIN (
         SELECT
           COALESCE(br.room_types_id, b.room_type_id, r_sub.room_type_id) AS room_type_id,
@@ -70,8 +78,8 @@ export class AvailabilityService {
       ORDER BY basePrice ASC
     `;
 
-    // params order: [endAt, startAt, endAt, startAt, apartmentId?]
-    const queryParams: any[] = [endAt, startAt, endAt, startAt];
+    // params order: [blockEndAt, blockStartAt, bookingEndAt, bookingStartAt, bookingEndAt, bookingStartAt, apartmentId?]
+    const queryParams: any[] = [endAt, startAt, endAt, startAt, endAt, startAt];
     if (criteria.apartmentId && Number(criteria.apartmentId) > 0) {
       queryParams.push(Number(criteria.apartmentId));
     }

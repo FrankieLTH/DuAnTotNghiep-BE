@@ -3,6 +3,7 @@ import {
   Get,
   Post,
   Put,
+  Delete,
   Body,
   Param,
   Query,
@@ -24,7 +25,20 @@ import { AdminLockPinService } from './admin-lock-pin.service';
 import { AdminCatalogStaffService } from './admin-catalog-staff.service';
 import { AuditLogService } from './audit-log.service';
 import { AdminBranchService, CreateBranchDto, UpdateBranchDto } from './admin-branch.service';
-import { AdminRoomService, CreateRoomTypeDto, UpdateRoomTypeDto, CreateRoomDto, UpdateRoomDto, BatchCreateRoomsDto } from './admin-room.service';
+import {
+  AdminRoomService,
+  CreateRoomTypeDto,
+  UpdateRoomTypeDto,
+  CreateRoomDto,
+  UpdateRoomDto,
+  BatchCreateRoomsDto,
+  NewBatchCreateRoomsDto,
+  CreateRoomBlockDto,
+  BulkFeatureDto,
+  BulkGroupDto,
+  CreateRoomGroupDto,
+  CreateRoomFeatureDto,
+} from './admin-room.service';
 
 @Controller('admin')
 @UseGuards(PermissionsGuard)
@@ -196,10 +210,30 @@ export class AdminController {
   @Post('rooms/batch')
   @RequirePermissions(Permission.ROOMS_MANAGE)
   async batchCreateRooms(
-    @Body() dto: BatchCreateRoomsDto,
+    @Body() dto: any,
+    @Query('dryRun') dryRun: string,
     @CurrentStaff() staff: StaffContext,
   ) {
+    if (dto.groups || dryRun === '1' || dryRun === 'true') {
+      return this.roomService.newBatchCreateRooms(
+        { ...dto, dry_run: dryRun === '1' || dryRun === 'true' || Boolean(dto.dry_run) },
+        staff.actor,
+      );
+    }
     return this.roomService.batchCreateRooms(dto, staff.actor);
+  }
+
+  @Post('rooms/batch-v2')
+  @RequirePermissions(Permission.ROOMS_MANAGE)
+  async newBatchCreateRooms(
+    @Body() dto: NewBatchCreateRoomsDto,
+    @Query('dryRun') dryRun: string,
+    @CurrentStaff() staff: StaffContext,
+  ) {
+    return this.roomService.newBatchCreateRooms(
+      { ...dto, dry_run: dryRun === '1' || dryRun === 'true' || Boolean(dto.dry_run) },
+      staff.actor,
+    );
   }
 
   @Put('rooms/:id')
@@ -210,6 +244,25 @@ export class AdminController {
     @CurrentStaff() staff: StaffContext,
   ) {
     return this.roomService.updateRoom(id, dto, staff.actor);
+  }
+
+  @Delete('rooms/:id')
+  @RequirePermissions(Permission.ROOMS_MANAGE)
+  async deleteRoom(
+    @Param('id', ParseIntPipe) id: number,
+    @CurrentStaff() staff: StaffContext,
+  ) {
+    return this.roomService.softDeleteRoom(id, staff.actor);
+  }
+
+  @Put('rooms/:id/housekeeping')
+  @RequirePermissions(Permission.ROOMS_STATUS_UPDATE)
+  async updateHousekeeping(
+    @Param('id', ParseIntPipe) id: number,
+    @Body('housekeeping') housekeeping: 'clean' | 'dirty',
+    @CurrentStaff() staff: StaffContext,
+  ) {
+    return this.roomService.updateHousekeeping(id, housekeeping, staff);
   }
 
   @Put('rooms/:id/status')
@@ -249,6 +302,122 @@ export class AdminController {
     @CurrentStaff() staff: StaffContext,
   ) {
     return this.roomService.assignLock(id, lockId !== undefined ? (lockId === null ? null : Number(lockId)) : null, staff.actor);
+  }
+
+  // Room Groups
+  @Get('room-groups')
+  @RequirePermissions(Permission.ROOMS_VIEW)
+  async getRoomGroups(@Query('onlyActive') onlyActive?: string) {
+    return this.roomService.getRoomGroups(onlyActive === '1' || onlyActive === 'true');
+  }
+
+  @Post('room-groups')
+  @RequirePermissions(Permission.ROOMS_MANAGE)
+  async createRoomGroup(
+    @Body() dto: CreateRoomGroupDto,
+    @CurrentStaff() staff: StaffContext,
+  ) {
+    return this.roomService.createRoomGroup(dto, staff.actor);
+  }
+
+  @Put('room-groups/:id')
+  @RequirePermissions(Permission.ROOMS_MANAGE)
+  async updateRoomGroup(
+    @Param('id', ParseIntPipe) id: number,
+    @Body('name') name: string,
+    @CurrentStaff() staff: StaffContext,
+  ) {
+    return this.roomService.updateRoomGroup(id, name, staff.actor);
+  }
+
+  @Post('room-groups/:id/toggle')
+  @RequirePermissions(Permission.ROOMS_MANAGE)
+  async toggleRoomGroup(
+    @Param('id', ParseIntPipe) id: number,
+    @CurrentStaff() staff: StaffContext,
+  ) {
+    return this.roomService.toggleRoomGroup(id, staff.actor);
+  }
+
+  // Room Features
+  @Get('room-features')
+  @RequirePermissions(Permission.ROOMS_VIEW)
+  async getRoomFeatures(@Query('onlyActive') onlyActive?: string) {
+    return this.roomService.getRoomFeatures(onlyActive === '1' || onlyActive === 'true');
+  }
+
+  @Post('room-features')
+  @RequirePermissions(Permission.ROOMS_MANAGE)
+  async createRoomFeature(
+    @Body() dto: CreateRoomFeatureDto,
+    @CurrentStaff() staff: StaffContext,
+  ) {
+    return this.roomService.createRoomFeature(dto, staff.actor);
+  }
+
+  @Put('room-features/:id')
+  @RequirePermissions(Permission.ROOMS_MANAGE)
+  async updateRoomFeature(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: Partial<CreateRoomFeatureDto>,
+    @CurrentStaff() staff: StaffContext,
+  ) {
+    return this.roomService.updateRoomFeature(id, dto, staff.actor);
+  }
+
+  @Post('room-features/:id/toggle')
+  @RequirePermissions(Permission.ROOMS_MANAGE)
+  async toggleRoomFeature(
+    @Param('id', ParseIntPipe) id: number,
+    @CurrentStaff() staff: StaffContext,
+  ) {
+    return this.roomService.toggleRoomFeature(id, staff.actor);
+  }
+
+  // Room Blocks (Lịch bảo trì)
+  @Get('rooms/:id/blocks')
+  @RequirePermissions(Permission.ROOMS_VIEW)
+  async getRoomBlocks(@Param('id', ParseIntPipe) id: number) {
+    return this.roomService.getRoomBlocks(id);
+  }
+
+  @Post('rooms/:id/blocks')
+  @RequirePermissions(Permission.ROOMS_MANAGE)
+  async createRoomBlock(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: CreateRoomBlockDto,
+    @CurrentStaff() staff: StaffContext,
+  ) {
+    return this.roomService.createRoomBlock(id, dto, staff.actor);
+  }
+
+  @Delete('rooms/:id/blocks/:blockId')
+  @RequirePermissions(Permission.ROOMS_MANAGE)
+  async deleteRoomBlock(
+    @Param('id', ParseIntPipe) id: number,
+    @Param('blockId', ParseIntPipe) blockId: number,
+    @CurrentStaff() staff: StaffContext,
+  ) {
+    return this.roomService.deleteRoomBlock(id, blockId, staff.actor);
+  }
+
+  // Bulk Operations
+  @Post('rooms/features/bulk')
+  @RequirePermissions(Permission.ROOMS_MANAGE)
+  async bulkAssignFeatures(
+    @Body() dto: BulkFeatureDto,
+    @CurrentStaff() staff: StaffContext,
+  ) {
+    return this.roomService.bulkAssignFeatures(dto, staff.actor);
+  }
+
+  @Post('rooms/groups/bulk')
+  @RequirePermissions(Permission.ROOMS_MANAGE)
+  async bulkAssignGroup(
+    @Body() dto: BulkGroupDto,
+    @CurrentStaff() staff: StaffContext,
+  ) {
+    return this.roomService.bulkAssignGroup(dto, staff.actor);
   }
 
   // ============================================================

@@ -99,6 +99,25 @@ export class Room {
   @Column()
   room_number: string;
 
+  @Column({ type: 'int', default: 1 })
+  floor: number;
+
+  @Column({ type: 'int', nullable: true })
+  room_group_id?: number | null;
+
+  @ManyToOne(() => RoomGroup, { nullable: true, onDelete: 'SET NULL' })
+  @JoinColumn({ name: 'room_group_id' })
+  room_group?: RoomGroup | null;
+
+  @Column({ type: 'text', nullable: true })
+  note?: string | null;
+
+  @Column({ type: 'enum', enum: ['clean', 'dirty'], default: 'clean' })
+  housekeeping: 'clean' | 'dirty';
+
+  @Column({ type: 'datetime', nullable: true })
+  deleted_at?: Date | null;
+
   @Column({ type: 'enum', enum: ['available', 'occupied', 'cleaning', 'maintenance'], default: 'available' })
   status: 'available' | 'occupied' | 'cleaning' | 'maintenance';
 
@@ -127,6 +146,78 @@ export class Room {
     inverseJoinColumn: { name: 'amenity_id', referencedColumnName: 'id' },
   })
   amenities: Amenity[];
+
+  @ManyToMany(() => RoomFeature)
+  @JoinTable({
+    name: 'room_feature_map',
+    joinColumn: { name: 'room_id', referencedColumnName: 'id' },
+    inverseJoinColumn: { name: 'feature_id', referencedColumnName: 'id' },
+  })
+  features: RoomFeature[];
+
+  @OneToMany(() => RoomBlock, (block) => block.room)
+  room_blocks: RoomBlock[];
+}
+
+@Entity('room_groups')
+export class RoomGroup {
+  @PrimaryGeneratedColumn()
+  id: number;
+
+  @Column({ unique: true })
+  name: string;
+
+  @Column({ default: true })
+  is_active: boolean;
+
+  @CreateDateColumn()
+  created_at: Date;
+}
+
+@Entity('room_features')
+export class RoomFeature {
+  @PrimaryGeneratedColumn()
+  id: number;
+
+  @Column({ unique: true })
+  name: string;
+
+  @Column({ type: 'enum', enum: ['view', 'sunlight', 'comfort', 'amenity'] })
+  category: 'view' | 'sunlight' | 'comfort' | 'amenity';
+
+  @Column({ default: true })
+  is_active: boolean;
+
+  @CreateDateColumn()
+  created_at: Date;
+}
+
+@Entity('room_blocks')
+export class RoomBlock {
+  @PrimaryGeneratedColumn()
+  id: number;
+
+  @Column()
+  room_id: number;
+
+  @ManyToOne(() => Room, (room) => room.room_blocks, { onDelete: 'CASCADE' })
+  @JoinColumn({ name: 'room_id' })
+  room: Room;
+
+  @Column({ type: 'datetime' })
+  from_at: Date;
+
+  @Column({ type: 'datetime', nullable: true })
+  to_at: Date | null;
+
+  @Column({ length: 500 })
+  reason: string;
+
+  @Column({ nullable: true, length: 100 })
+  created_by: string;
+
+  @CreateDateColumn()
+  created_at: Date;
 }
 
 @Entity('amenities')

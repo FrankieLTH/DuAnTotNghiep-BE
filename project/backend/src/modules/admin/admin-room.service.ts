@@ -8,6 +8,12 @@ import {
 import { DataSource } from 'typeorm';
 import { AuditLogService } from './audit-log.service';
 import { StaffContext } from '../../common/config/permissions.config';
+import {
+  normalizeRoomNumber,
+  suggestFloor,
+  buildBatchPlan,
+  computeRoomDisplayStatus,
+} from '@shared/rooms';
 
 export interface CreateRoomTypeDto {
   name: string;
@@ -38,18 +44,37 @@ export interface CreateRoomDto {
   apartment_id: number;
   room_type_id: number;
   room_number: string;
+  floor?: number;
+  room_group_id?: number | null;
+  note?: string;
   status?: 'available' | 'maintenance';
+  initial_block_reason?: string;  // bắt buộc nếu status = 'maintenance'
   lock_id?: number | null;
   special_features?: string;
+  feature_ids?: number[];
 }
 
 export interface UpdateRoomDto {
   apartment_id?: number;
   room_type_id?: number;
   room_number?: string;
+  floor?: number;
+  room_group_id?: number | null;
+  note?: string;
+  housekeeping?: 'clean' | 'dirty';
   status?: 'available' | 'maintenance';
   lock_id?: number | null;
   special_features?: string;
+  feature_ids?: number[];
+}
+
+export interface BatchGroupItem {
+  label: string;
+  roomGroupId?: number | null;
+  roomTypeId: number;
+  featureIds?: number[];
+  note?: string;
+  roomNumbers: string[];
 }
 
 export interface BatchCreateRoomItem {
@@ -62,6 +87,42 @@ export interface BatchCreateRoomsDto {
   apartment_id: number;
   room_type_id: number;
   rooms: BatchCreateRoomItem[];
+  // Legacy fields kept for backward compat
+}
+
+export interface NewBatchCreateRoomsDto {
+  apartment_id: number;
+  default_status?: 'available' | 'maintenance';
+  common_feature_ids?: number[];
+  groups: BatchGroupItem[];
+  dry_run?: boolean;
+}
+
+export interface CreateRoomBlockDto {
+  from_at: string;
+  to_at?: string | null;
+  reason: string;
+  confirm?: boolean;  // nếu true thì lưu dù có booking trùng
+}
+
+export interface BulkFeatureDto {
+  room_ids: number[];
+  add_feature_ids?: number[];
+  remove_feature_ids?: number[];
+}
+
+export interface BulkGroupDto {
+  room_ids: number[];
+  room_group_id: number | null;
+}
+
+export interface CreateRoomGroupDto {
+  name: string;
+}
+
+export interface CreateRoomFeatureDto {
+  name: string;
+  category: 'view' | 'sunlight' | 'comfort' | 'amenity';
 }
 
 @Injectable()
@@ -381,6 +442,11 @@ export class AdminRoomService {
       SELECT 
         r.room_id,
         r.room_number,
+        r.floor,
+        r.room_group_id,
+        rg.name AS room_group_name,
+        r.note,
+        r.housekeeping,
         r.apartment_id,
         a.name AS apartment_name,
         r.room_type_id,
@@ -397,6 +463,9 @@ export class AdminRoomService {
         l.lock_status,
         l.battery_level,
         l.last_sync_at,
+        (SELECT GROUP_CONCAT(rfm.feature_id) FROM room_feature_map rfm WHERE rfm.room_id = r.room_id) AS feature_ids_str,
+        (SELECT COUNT(*) FROM room_blocks rb WHERE rb.room_id = r.room_id AND rb.from_at <= NOW() AND (rb.to_at IS NULL OR rb.to_at >= NOW())) AS active_blocks_count,
+        (SELECT COUNT(*) FROM Booking_rooms br JOIN BOOKINGS b ON b.id = br.bookings_id WHERE br.room_id = r.room_id AND b.booking_status = 'checked_in') AS has_checked_in_booking,
         CASE 
           WHEN r.status = 'available' AND r.is_hidden = 0 AND l.id IS NOT NULL THEN 1 
           ELSE 0 
@@ -404,8 +473,9 @@ export class AdminRoomService {
       FROM ROOMS r
       LEFT JOIN APARTMENT a ON a.id = r.apartment_id
       LEFT JOIN room_types rt ON rt.id = r.room_type_id
+      LEFT JOIN room_groups rg ON rg.id = r.room_group_id
       LEFT JOIN lock l ON l.room_id = r.room_id AND l.deleted_at IS NULL
-      WHERE 1=1
+      WHERE r.deleted_at IS NULL
     `;
     const params: any[] = [];
 
@@ -429,34 +499,55 @@ export class AdminRoomService {
       params.push(filter.is_hidden ? 1 : 0);
     }
 
-    sql += ` ORDER BY r.apartment_id ASC, r.room_number ASC`;
+    sql += ` ORDER BY r.apartment_id ASC, r.floor ASC, r.room_number ASC`;
 
     const rows = await this.dataSource.query(sql, params);
 
-    return rows.map((r: any) => ({
-      room_id: r.room_id,
-      room_number: r.room_number,
-      apartment_id: r.apartment_id,
-      apartment_name: r.apartment_name,
-      room_type_id: r.room_type_id,
-      room_type_name: r.room_type_name,
-      status: r.status,
-      is_hidden: Boolean(r.is_hidden),
-      last_maintenance_date: r.last_maintenance_date,
-      created_at: r.created_at,
-      updated_at: r.updated_at,
-      is_ready_for_booking: Boolean(r.is_ready_for_booking),
-      lock: r.lock_id
-        ? {
-            id: r.lock_id,
-            cloud_lock_id: r.cloud_lock_id,
-            lock_name: r.lock_name,
-            lock_status: r.lock_status,
-            battery_level: r.battery_level,
-            last_sync_at: r.last_sync_at,
-          }
-        : null,
-    }));
+    return rows.map((r: any) => {
+      const activeBlocks = Number(r.active_blocks_count) > 0 ? [{ id: 1, room_id: r.room_id, from_at: new Date(), to_at: null, reason: 'active' }] : [];
+      const hasCheckedIn = Number(r.has_checked_in_booking) > 0;
+      const displayStatus = computeRoomDisplayStatus(
+        { housekeeping: r.housekeeping },
+        activeBlocks,
+        hasCheckedIn,
+      );
+
+      const featureIds = r.feature_ids_str
+        ? r.feature_ids_str.split(',').map((id: string) => Number(id.trim())).filter((n: number) => !isNaN(n))
+        : [];
+
+      return {
+        room_id: r.room_id,
+        room_number: r.room_number,
+        floor: r.floor ?? 0,
+        room_group_id: r.room_group_id || null,
+        room_group_name: r.room_group_name || null,
+        note: r.note || '',
+        housekeeping: r.housekeeping || 'clean',
+        apartment_id: r.apartment_id,
+        apartment_name: r.apartment_name,
+        room_type_id: r.room_type_id,
+        room_type_name: r.room_type_name,
+        status: r.status,
+        display_status: displayStatus,
+        feature_ids: featureIds,
+        is_hidden: Boolean(r.is_hidden),
+        last_maintenance_date: r.last_maintenance_date,
+        created_at: r.created_at,
+        updated_at: r.updated_at,
+        is_ready_for_booking: Boolean(r.is_ready_for_booking),
+        lock: r.lock_id
+          ? {
+              id: r.lock_id,
+              cloud_lock_id: r.cloud_lock_id,
+              lock_name: r.lock_name,
+              lock_status: r.lock_status,
+              battery_level: r.battery_level,
+              last_sync_at: r.last_sync_at,
+            }
+          : null,
+      };
+    });
   }
 
   /**
@@ -499,6 +590,9 @@ export class AdminRoomService {
       throw new BadRequestException('Chi nhánh và Loại phòng là bắt buộc.');
     }
 
+    const normalizedRoomNumber = normalizeRoomNumber(dto.room_number);
+    const floor = dto.floor !== undefined ? Number(dto.floor) : (suggestFloor(normalizedRoomNumber) ?? 0);
+
     // Kiểm tra loại phòng có thuộc đúng chi nhánh hay không
     const [roomType] = await this.dataSource.query(
       `SELECT id, name, apartment_id FROM room_types WHERE id = ?`,
@@ -514,24 +608,68 @@ export class AdminRoomService {
       );
     }
 
+    // Kiểm tra nhóm phòng nếu có
+    if (dto.room_group_id) {
+      const [rg] = await this.dataSource.query(
+        `SELECT id, name, is_active FROM room_groups WHERE id = ?`,
+        [dto.room_group_id],
+      );
+      if (!rg || !rg.is_active) {
+        throw new BadRequestException(`Nhóm phòng #${dto.room_group_id} không tồn tại hoặc đã bị vô hiệu hóa.`);
+      }
+    }
+
+    // Nếu trạng thái ban đầu là bảo trì, bắt buộc có lý do
+    if (dto.status === 'maintenance' && (!dto.initial_block_reason || !dto.initial_block_reason.trim())) {
+      throw new BadRequestException('Bắt buộc nhập lý do bảo trì (initial_block_reason) khi chọn trạng thái ban đầu là Bảo trì.');
+    }
+
     // Kiểm tra UNIQUE (apartment_id, room_number)
     const [duplicate] = await this.dataSource.query(
-      `SELECT room_id FROM ROOMS WHERE apartment_id = ? AND LOWER(room_number) = LOWER(?)`,
-      [dto.apartment_id, dto.room_number.trim()],
+      `SELECT room_id FROM ROOMS WHERE apartment_id = ? AND LOWER(room_number) = LOWER(?) AND deleted_at IS NULL`,
+      [dto.apartment_id, normalizedRoomNumber],
     );
     if (duplicate) {
       throw new BadRequestException(
-        `Số phòng "${dto.room_number}" đã tồn tại tại chi nhánh này. Vui lòng chọn số phòng khác.`,
+        `Số phòng "${normalizedRoomNumber}" đã tồn tại tại chi nhánh này. Vui lòng chọn số phòng khác.`,
       );
     }
 
     // Thêm mới phòng
     const res = await this.dataSource.query(
-      `INSERT INTO ROOMS (apartment_id, room_type_id, room_number, status, special_features, is_hidden, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, 0, NOW(), NOW())`,
-      [dto.apartment_id, dto.room_type_id, dto.room_number.trim(), dto.status || 'available', dto.special_features?.trim() || null],
+      `INSERT INTO ROOMS (apartment_id, room_type_id, room_number, floor, room_group_id, note, housekeeping, status, special_features, is_hidden, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, 'clean', ?, ?, 0, NOW(), NOW())`,
+      [
+        dto.apartment_id,
+        dto.room_type_id,
+        normalizedRoomNumber,
+        floor,
+        dto.room_group_id || null,
+        dto.note?.trim() || null,
+        dto.status || 'available',
+        dto.special_features?.trim() || null,
+      ],
     );
     const newRoomId = res.insertId;
+
+    // Lưu đặc điểm phòng vào room_feature_map
+    if (dto.feature_ids && dto.feature_ids.length > 0) {
+      for (const featId of dto.feature_ids) {
+        await this.dataSource.query(
+          `INSERT IGNORE INTO room_feature_map (room_id, feature_id) VALUES (?, ?)`,
+          [newRoomId, featId],
+        );
+      }
+    }
+
+    // Nếu là bảo trì ban đầu, tạo room_blocks mở
+    if (dto.status === 'maintenance') {
+      await this.dataSource.query(
+        `INSERT INTO room_blocks (room_id, from_at, to_at, reason, created_by, created_at)
+         VALUES (?, NOW(), NULL, ?, ?, NOW())`,
+        [newRoomId, dto.initial_block_reason.trim(), actor],
+      );
+    }
 
     // Gán khóa nếu có chọn
     if (dto.lock_id) {
@@ -554,7 +692,7 @@ export class AdminRoomService {
       action: 'CREATE_ROOM',
       entity_type: 'ROOMS',
       entity_id: newRoomId,
-      new_value: { room_id: newRoomId, ...dto },
+      new_value: { room_id: newRoomId, ...dto, room_number: normalizedRoomNumber, floor },
     });
 
     return { success: true, room_id: newRoomId, message: 'Tạo phòng mới thành công.' };
@@ -673,6 +811,26 @@ export class AdminRoomService {
     const targetAptId = dto.apartment_id || room.apartment_id;
     const targetTypeId = dto.room_type_id || room.room_type_id;
 
+    // Chặn đổi loại phòng hoặc chi nhánh nếu còn booking tương lai hoặc đang lưu trú
+    const isChangingBranch = dto.apartment_id && Number(dto.apartment_id) !== Number(room.apartment_id);
+    const isChangingType = dto.room_type_id && Number(dto.room_type_id) !== Number(room.room_type_id);
+    if (isChangingBranch || isChangingType) {
+      const activeBookings = await this.dataSource.query(
+        `SELECT b.id, b.booking_code
+         FROM Booking_rooms br
+         JOIN BOOKINGS b ON b.id = br.bookings_id
+         WHERE br.room_id = ?
+           AND (b.booking_status = 'checked_in' OR (b.booking_status = 'confirmed' AND b.booked_end_time > NOW()))`,
+        [roomId],
+      );
+      if (activeBookings && activeBookings.length > 0) {
+        const codes = activeBookings.map((b: any) => b.booking_code).join(', ');
+        throw new BadRequestException(
+          `Không thể thay đổi chi nhánh hoặc loại phòng vì phòng đang có đơn đặt hiệu lực hoặc đang lưu trú (${codes}).`,
+        );
+      }
+    }
+
     // Kiểm tra loại phòng có khớp chi nhánh
     if (dto.room_type_id || dto.apartment_id) {
       const [roomType] = await this.dataSource.query(
@@ -689,29 +847,75 @@ export class AdminRoomService {
       }
     }
 
-    // Kiểm tra UNIQUE (apartment_id, room_number)
-    if (dto.room_number) {
-      const [duplicate] = await this.dataSource.query(
-        `SELECT room_id FROM ROOMS WHERE apartment_id = ? AND LOWER(room_number) = LOWER(?) AND room_id != ?`,
-        [targetAptId, dto.room_number.trim(), roomId],
+    // Kiểm tra nhóm phòng nếu có truyền
+    if (dto.room_group_id !== undefined && dto.room_group_id !== null) {
+      const [rg] = await this.dataSource.query(
+        `SELECT id, is_active FROM room_groups WHERE id = ?`,
+        [dto.room_group_id],
       );
-      if (duplicate) {
-        throw new BadRequestException(`Số phòng "${dto.room_number}" đã được sử dụng tại chi nhánh này.`);
+      if (!rg || !rg.is_active) {
+        throw new BadRequestException(`Nhóm phòng #${dto.room_group_id} không tồn tại hoặc đã bị vô hiệu hóa.`);
       }
     }
+
+    let finalRoomNumber = room.room_number;
+    if (dto.room_number) {
+      finalRoomNumber = normalizeRoomNumber(dto.room_number);
+      const [duplicate] = await this.dataSource.query(
+        `SELECT room_id FROM ROOMS WHERE apartment_id = ? AND LOWER(room_number) = LOWER(?) AND room_id != ? AND deleted_at IS NULL`,
+        [targetAptId, finalRoomNumber, roomId],
+      );
+      if (duplicate) {
+        throw new BadRequestException(`Số phòng "${finalRoomNumber}" đã được sử dụng tại chi nhánh này.`);
+      }
+    }
+
+    const finalFloor = dto.floor !== undefined
+      ? Number(dto.floor)
+      : (dto.room_number ? (suggestFloor(finalRoomNumber) ?? room.floor) : room.floor);
 
     const updated = {
       apartment_id: targetAptId,
       room_type_id: targetTypeId,
-      room_number: dto.room_number !== undefined ? dto.room_number.trim() : room.room_number,
+      room_number: finalRoomNumber,
+      floor: finalFloor,
+      room_group_id: dto.room_group_id !== undefined ? dto.room_group_id : room.room_group_id,
+      note: dto.note !== undefined ? (dto.note?.trim() || null) : room.note,
+      housekeeping: dto.housekeeping !== undefined ? dto.housekeeping : (room.housekeeping || 'clean'),
       status: dto.status !== undefined ? dto.status : room.status,
       special_features: dto.special_features !== undefined ? (dto.special_features?.trim() || null) : room.special_features,
     };
 
     await this.dataSource.query(
-      `UPDATE ROOMS SET apartment_id = ?, room_type_id = ?, room_number = ?, status = ?, special_features = ?, updated_at = NOW() WHERE room_id = ?`,
-      [updated.apartment_id, updated.room_type_id, updated.room_number, updated.status, updated.special_features, roomId],
+      `UPDATE ROOMS 
+       SET apartment_id = ?, room_type_id = ?, room_number = ?, floor = ?, room_group_id = ?, note = ?, housekeeping = ?, status = ?, special_features = ?, updated_at = NOW() 
+       WHERE room_id = ?`,
+      [
+        updated.apartment_id,
+        updated.room_type_id,
+        updated.room_number,
+        updated.floor,
+        updated.room_group_id,
+        updated.note,
+        updated.housekeeping,
+        updated.status,
+        updated.special_features,
+        roomId,
+      ],
     );
+
+    // Cập nhật features nếu có
+    if (dto.feature_ids !== undefined) {
+      await this.dataSource.query(`DELETE FROM room_feature_map WHERE room_id = ?`, [roomId]);
+      if (Array.isArray(dto.feature_ids) && dto.feature_ids.length > 0) {
+        for (const featId of dto.feature_ids) {
+          await this.dataSource.query(
+            `INSERT IGNORE INTO room_feature_map (room_id, feature_id) VALUES (?, ?)`,
+            [roomId, featId],
+          );
+        }
+      }
+    }
 
     // Gán/đổi khóa nếu có truyền lock_id
     if (dto.lock_id !== undefined) {
@@ -728,6 +932,79 @@ export class AdminRoomService {
     });
 
     return { success: true, message: 'Cập nhật thông tin phòng thành công.' };
+  }
+
+  /**
+   * 4.1 ĐỔI TRẠNG THÁI HOUSEKEEPING (CHỈ ĐỔI SẠCH / CẦN DỌN)
+   * - Cả Admin và Manager (của chi nhánh) đều được phép.
+   */
+  async updateHousekeeping(roomId: number, housekeeping: 'clean' | 'dirty', staff: StaffContext) {
+    const [room] = await this.dataSource.query(`SELECT * FROM ROOMS WHERE room_id = ? AND deleted_at IS NULL`, [roomId]);
+    if (!room) {
+      throw new NotFoundException(`Không tìm thấy phòng #${roomId}`);
+    }
+
+    if (staff.role === 'manager' && Number(staff.apartmentId) !== Number(room.apartment_id)) {
+      throw new ForbiddenException('Bạn chỉ có quyền quản lý buồng phòng thuộc chi nhánh của mình.');
+    }
+
+    await this.dataSource.query(
+      `UPDATE ROOMS SET housekeeping = ?, updated_at = NOW() WHERE room_id = ?`,
+      [housekeeping, roomId],
+    );
+
+    await this.auditLogService.log({
+      actor: staff.actor,
+      action: 'UPDATE_HOUSEKEEPING',
+      entity_type: 'ROOMS',
+      entity_id: roomId,
+      old_value: { housekeeping: room.housekeeping },
+      new_value: { housekeeping },
+    });
+
+    return {
+      success: true,
+      message: `Đã cập nhật tình trạng dọn dẹp phòng ${room.room_number} sang "${housekeeping === 'clean' ? 'Sạch' : 'Cần dọn'}".`,
+    };
+  }
+
+  /**
+   * 4.2 XÓA MỀM PHÒNG (CHỈ ADMIN)
+   * - Không cho phép xóa nếu phòng từng có booking.
+   */
+  async softDeleteRoom(roomId: number, actor: string) {
+    const [room] = await this.dataSource.query(`SELECT * FROM ROOMS WHERE room_id = ? AND deleted_at IS NULL`, [roomId]);
+    if (!room) {
+      throw new NotFoundException(`Không tìm thấy phòng #${roomId}`);
+    }
+
+    // Kiểm tra xem phòng từng có booking nào chưa
+    const [bookingCount] = await this.dataSource.query(
+      `SELECT COUNT(*) AS cnt FROM Booking_rooms WHERE room_id = ?`,
+      [roomId],
+    );
+
+    if (bookingCount && Number(bookingCount.cnt) > 0) {
+      throw new BadRequestException(
+        `Không thể xóa phòng ${room.room_number} vì phòng này đã từng có lịch sử đặt phòng (${bookingCount.cnt} lượt). Vui lòng sử dụng tính năng ẩn phòng thay thế.`,
+      );
+    }
+
+    await this.dataSource.query(
+      `UPDATE ROOMS SET deleted_at = NOW(), updated_at = NOW() WHERE room_id = ?`,
+      [roomId],
+    );
+
+    await this.auditLogService.log({
+      actor,
+      action: 'SOFT_DELETE_ROOM',
+      entity_type: 'ROOMS',
+      entity_id: roomId,
+      old_value: { deleted_at: null },
+      new_value: { deleted_at: new Date() },
+    });
+
+    return { success: true, message: `Đã xóa phòng ${room.room_number} thành công.` };
   }
 
   /**
@@ -832,24 +1109,21 @@ export class AdminRoomService {
       throw new NotFoundException(`Không tìm thấy phòng #${roomId}`);
     }
 
-    // Kiểm tra đơn tương lai
+    // Kiểm tra đơn tương lai hoặc đang lưu trú
     const futureBookings = await this.dataSource.query(
       `SELECT b.id, b.booking_code, b.booked_start_time, b.booked_end_time
        FROM Booking_rooms br
        JOIN BOOKINGS b ON b.id = br.bookings_id
        WHERE br.room_id = ?
-         AND b.booked_end_time > NOW()
-         AND b.booking_status IN ('confirmed', 'checked_in')`,
+         AND (b.booking_status = 'checked_in' OR (b.booking_status = 'confirmed' AND b.booked_end_time > NOW()))`,
       [roomId],
     );
 
-    let warning = null;
     if (futureBookings && futureBookings.length > 0) {
-      warning = {
-        has_warning: true,
-        message: `Phòng ${room.room_number} đang có ${futureBookings.length} đơn tương lai có hiệu lực.`,
-        affected_bookings: futureBookings,
-      };
+      const codes = futureBookings.map((b: any) => b.booking_code).join(', ');
+      throw new BadRequestException(
+        `Không thể ẩn phòng ${room.room_number} vì còn ${futureBookings.length} đơn đặt phòng đang có hiệu lực hoặc đang lưu trú (${codes}).`,
+      );
     }
 
     await this.dataSource.query(`UPDATE ROOMS SET is_hidden = 1, updated_at = NOW() WHERE room_id = ?`, [
@@ -865,7 +1139,7 @@ export class AdminRoomService {
       new_value: { is_hidden: 1 },
     });
 
-    return { success: true, message: `Đã tạm ẩn phòng ${room.room_number}.`, warning };
+    return { success: true, message: `Đã tạm ẩn phòng ${room.room_number}.` };
   }
 
   /**
@@ -985,5 +1259,696 @@ export class AdminRoomService {
       success: true,
       message: `Đã gán khóa "${targetLock.lock_name || lockId}" cho phòng ${room.room_number}.`,
     };
+  }
+
+  // ==========================================================================
+  // D. QUẢN LÝ NHÓM PHÒNG (ROOM GROUPS - CHỈ ADMIN)
+  // ==========================================================================
+
+  async getRoomGroups(onlyActive = false) {
+    let sql = `SELECT id, name, is_active, created_at FROM room_groups`;
+    if (onlyActive) {
+      sql += ` WHERE is_active = 1`;
+    }
+    sql += ` ORDER BY id ASC`;
+    const rows = await this.dataSource.query(sql);
+    return rows.map((r: any) => ({
+      id: r.id,
+      name: r.name,
+      is_active: Boolean(r.is_active),
+      created_at: r.created_at,
+    }));
+  }
+
+  async createRoomGroup(dto: CreateRoomGroupDto, actor: string) {
+    if (!dto.name || !dto.name.trim()) {
+      throw new BadRequestException('Tên nhóm phòng không được để trống.');
+    }
+    const trimmedName = dto.name.trim();
+
+    const [existing] = await this.dataSource.query(
+      `SELECT id FROM room_groups WHERE LOWER(name) = LOWER(?)`,
+      [trimmedName],
+    );
+    if (existing) {
+      throw new BadRequestException(`Nhóm phòng "${trimmedName}" đã tồn tại.`);
+    }
+
+    const res = await this.dataSource.query(
+      `INSERT INTO room_groups (name, is_active, created_at) VALUES (?, 1, NOW())`,
+      [trimmedName],
+    );
+    const newId = res.insertId;
+
+    await this.auditLogService.log({
+      actor,
+      action: 'CREATE_ROOM_GROUP',
+      entity_type: 'room_groups',
+      entity_id: newId,
+      new_value: { id: newId, name: trimmedName, is_active: 1 },
+    });
+
+    return { success: true, id: newId, message: `Đã tạo nhóm phòng "${trimmedName}".` };
+  }
+
+  async updateRoomGroup(id: number, name: string, actor: string) {
+    if (!name || !name.trim()) {
+      throw new BadRequestException('Tên nhóm phòng không được để trống.');
+    }
+    const trimmedName = name.trim();
+
+    const [current] = await this.dataSource.query(`SELECT * FROM room_groups WHERE id = ?`, [id]);
+    if (!current) {
+      throw new NotFoundException(`Không tìm thấy nhóm phòng #${id}`);
+    }
+
+    const [duplicate] = await this.dataSource.query(
+      `SELECT id FROM room_groups WHERE LOWER(name) = LOWER(?) AND id != ?`,
+      [trimmedName, id],
+    );
+    if (duplicate) {
+      throw new BadRequestException(`Nhóm phòng "${trimmedName}" đã tồn tại.`);
+    }
+
+    await this.dataSource.query(`UPDATE room_groups SET name = ? WHERE id = ?`, [trimmedName, id]);
+
+    await this.auditLogService.log({
+      actor,
+      action: 'UPDATE_ROOM_GROUP',
+      entity_type: 'room_groups',
+      entity_id: id,
+      old_value: current,
+      new_value: { ...current, name: trimmedName },
+    });
+
+    return { success: true, message: `Đã cập nhật tên nhóm phòng thành "${trimmedName}".` };
+  }
+
+  async toggleRoomGroup(id: number, actor: string) {
+    const [current] = await this.dataSource.query(`SELECT * FROM room_groups WHERE id = ?`, [id]);
+    if (!current) {
+      throw new NotFoundException(`Không tìm thấy nhóm phòng #${id}`);
+    }
+
+    const nextState = current.is_active ? 0 : 1;
+    await this.dataSource.query(`UPDATE room_groups SET is_active = ? WHERE id = ?`, [nextState, id]);
+
+    await this.auditLogService.log({
+      actor,
+      action: 'TOGGLE_ROOM_GROUP',
+      entity_type: 'room_groups',
+      entity_id: id,
+      old_value: { is_active: current.is_active },
+      new_value: { is_active: nextState },
+    });
+
+    return {
+      success: true,
+      is_active: Boolean(nextState),
+      message: `Đã ${nextState ? 'kích hoạt' : 'vô hiệu hóa'} nhóm phòng "${current.name}".`,
+    };
+  }
+
+  // ==========================================================================
+  // E. QUẢN LÝ ĐẶC ĐIỂM PHÒNG (ROOM FEATURES - CHỈ ADMIN)
+  // ==========================================================================
+
+  async getRoomFeatures(onlyActive = false) {
+    let sql = `SELECT id, name, category, is_active, created_at FROM room_features`;
+    if (onlyActive) {
+      sql += ` WHERE is_active = 1`;
+    }
+    sql += ` ORDER BY category ASC, id ASC`;
+    const rows = await this.dataSource.query(sql);
+    return rows.map((r: any) => ({
+      id: r.id,
+      name: r.name,
+      category: r.category,
+      is_active: Boolean(r.is_active),
+      created_at: r.created_at,
+    }));
+  }
+
+  async createRoomFeature(dto: CreateRoomFeatureDto, actor: string) {
+    if (!dto.name || !dto.name.trim()) {
+      throw new BadRequestException('Tên đặc điểm không được để trống.');
+    }
+    const trimmedName = dto.name.trim();
+
+    const validCategories = ['view', 'sunlight', 'comfort', 'amenity'];
+    if (!validCategories.includes(dto.category)) {
+      throw new BadRequestException(`Danh mục đặc điểm không hợp lệ. Phải thuộc: ${validCategories.join(', ')}`);
+    }
+
+    const [existing] = await this.dataSource.query(
+      `SELECT id FROM room_features WHERE LOWER(name) = LOWER(?)`,
+      [trimmedName],
+    );
+    if (existing) {
+      throw new BadRequestException(`Đặc điểm "${trimmedName}" đã tồn tại.`);
+    }
+
+    const res = await this.dataSource.query(
+      `INSERT INTO room_features (name, category, is_active, created_at) VALUES (?, ?, 1, NOW())`,
+      [trimmedName, dto.category],
+    );
+    const newId = res.insertId;
+
+    await this.auditLogService.log({
+      actor,
+      action: 'CREATE_ROOM_FEATURE',
+      entity_type: 'room_features',
+      entity_id: newId,
+      new_value: { id: newId, name: trimmedName, category: dto.category, is_active: 1 },
+    });
+
+    return { success: true, id: newId, message: `Đã tạo đặc điểm "${trimmedName}".` };
+  }
+
+  async updateRoomFeature(id: number, dto: Partial<CreateRoomFeatureDto>, actor: string) {
+    const [current] = await this.dataSource.query(`SELECT * FROM room_features WHERE id = ?`, [id]);
+    if (!current) {
+      throw new NotFoundException(`Không tìm thấy đặc điểm #${id}`);
+    }
+
+    let finalName = current.name;
+    if (dto.name && dto.name.trim()) {
+      finalName = dto.name.trim();
+      const [duplicate] = await this.dataSource.query(
+        `SELECT id FROM room_features WHERE LOWER(name) = LOWER(?) AND id != ?`,
+        [finalName, id],
+      );
+      if (duplicate) {
+        throw new BadRequestException(`Đặc điểm "${finalName}" đã tồn tại.`);
+      }
+    }
+
+    let finalCategory = current.category;
+    if (dto.category) {
+      const validCategories = ['view', 'sunlight', 'comfort', 'amenity'];
+      if (!validCategories.includes(dto.category)) {
+        throw new BadRequestException(`Danh mục đặc điểm không hợp lệ.`);
+      }
+      finalCategory = dto.category;
+    }
+
+    await this.dataSource.query(
+      `UPDATE room_features SET name = ?, category = ? WHERE id = ?`,
+      [finalName, finalCategory, id],
+    );
+
+    await this.auditLogService.log({
+      actor,
+      action: 'UPDATE_ROOM_FEATURE',
+      entity_type: 'room_features',
+      entity_id: id,
+      old_value: current,
+      new_value: { ...current, name: finalName, category: finalCategory },
+    });
+
+    return { success: true, message: `Đã cập nhật đặc điểm thành "${finalName}".` };
+  }
+
+  async toggleRoomFeature(id: number, actor: string) {
+    const [current] = await this.dataSource.query(`SELECT * FROM room_features WHERE id = ?`, [id]);
+    if (!current) {
+      throw new NotFoundException(`Không tìm thấy đặc điểm #${id}`);
+    }
+
+    const nextState = current.is_active ? 0 : 1;
+    await this.dataSource.query(`UPDATE room_features SET is_active = ? WHERE id = ?`, [nextState, id]);
+
+    await this.auditLogService.log({
+      actor,
+      action: 'TOGGLE_ROOM_FEATURE',
+      entity_type: 'room_features',
+      entity_id: id,
+      old_value: { is_active: current.is_active },
+      new_value: { is_active: nextState },
+    });
+
+    return {
+      success: true,
+      is_active: Boolean(nextState),
+      message: `Đã ${nextState ? 'kích hoạt' : 'vô hiệu hóa'} đặc điểm "${current.name}".`,
+    };
+  }
+
+  // ==========================================================================
+  // F. QUẢN LÝ LỊCH BẢO TRÌ PHÒNG (ROOM BLOCKS)
+  // ==========================================================================
+
+  async getRoomBlocks(roomId: number) {
+    const rows = await this.dataSource.query(
+      `SELECT id, room_id, from_at, to_at, reason, created_by, created_at 
+       FROM room_blocks 
+       WHERE room_id = ? 
+       ORDER BY from_at DESC`,
+      [roomId],
+    );
+    return rows.map((r: any) => ({
+      id: r.id,
+      room_id: r.room_id,
+      from_at: r.from_at,
+      to_at: r.to_at,
+      reason: r.reason,
+      created_by: r.created_by,
+      created_at: r.created_at,
+    }));
+  }
+
+  async createRoomBlock(roomId: number, dto: CreateRoomBlockDto, actor: string) {
+    const [room] = await this.dataSource.query(`SELECT * FROM ROOMS WHERE room_id = ? AND deleted_at IS NULL`, [roomId]);
+    if (!room) {
+      throw new NotFoundException(`Không tìm thấy phòng #${roomId}`);
+    }
+
+    if (!dto.reason || !dto.reason.trim()) {
+      throw new BadRequestException('Lý do bảo trì là bắt buộc.');
+    }
+
+    const fromAt = new Date(dto.from_at);
+    if (isNaN(fromAt.getTime())) {
+      throw new BadRequestException('Thời gian bắt đầu bảo trì không hợp lệ.');
+    }
+    const toAt = dto.to_at ? new Date(dto.to_at) : null;
+    if (toAt && isNaN(toAt.getTime())) {
+      throw new BadRequestException('Thời gian kết thúc bảo trì không hợp lệ.');
+    }
+    if (toAt && toAt <= fromAt) {
+      throw new BadRequestException('Thời gian kết thúc phải sau thời gian bắt đầu.');
+    }
+
+    // Kiểm tra đơn đặt phòng trùng khoảng bảo trì
+    const conflictSql = `
+      SELECT b.id, b.booking_code, b.booked_start_time, b.booked_end_time, b.booking_status
+      FROM Booking_rooms br
+      JOIN BOOKINGS b ON b.id = br.bookings_id
+      WHERE br.room_id = ?
+        AND b.booking_status IN ('confirmed', 'checked_in')
+        AND (
+          (? < b.booked_end_time) AND (? IS NULL OR ? > b.booked_start_time)
+        )
+    `;
+    const conflictBookings = await this.dataSource.query(conflictSql, [roomId, fromAt, toAt, toAt]);
+
+    if (conflictBookings && conflictBookings.length > 0 && !dto.confirm) {
+      return {
+        success: false,
+        conflict: true,
+        affected_bookings: conflictBookings,
+        message: `Khoảng thời gian bảo trì trùng với ${conflictBookings.length} đơn đặt phòng hiệu lực. Vui lòng xác nhận để tiếp tục đặt bảo trì.`,
+      };
+    }
+
+    const res = await this.dataSource.query(
+      `INSERT INTO room_blocks (room_id, from_at, to_at, reason, created_by, created_at)
+       VALUES (?, ?, ?, ?, ?, NOW())`,
+      [roomId, fromAt, toAt, dto.reason.trim(), actor],
+    );
+    const newBlockId = res.insertId;
+
+    // Cập nhật trạng thái phòng thành maintenance nếu block có hiệu lực ngay bây giờ
+    const now = new Date();
+    if (fromAt <= now && (!toAt || toAt >= now)) {
+      await this.dataSource.query(
+        `UPDATE ROOMS SET status = 'maintenance', updated_at = NOW() WHERE room_id = ?`,
+        [roomId],
+      );
+    }
+
+    await this.auditLogService.log({
+      actor,
+      action: 'CREATE_ROOM_BLOCK',
+      entity_type: 'room_blocks',
+      entity_id: newBlockId,
+      new_value: { id: newBlockId, room_id: roomId, from_at: fromAt, to_at: toAt, reason: dto.reason.trim() },
+    });
+
+    return {
+      success: true,
+      block_id: newBlockId,
+      message: `Đã tạo lịch bảo trì cho phòng ${room.room_number}.`,
+    };
+  }
+
+  async deleteRoomBlock(roomId: number, blockId: number, actor: string) {
+    const [block] = await this.dataSource.query(
+      `SELECT * FROM room_blocks WHERE id = ? AND room_id = ?`,
+      [blockId, roomId],
+    );
+    if (!block) {
+      throw new NotFoundException(`Không tìm thấy lịch bảo trì #${blockId} của phòng #${roomId}`);
+    }
+
+    await this.dataSource.query(`DELETE FROM room_blocks WHERE id = ?`, [blockId]);
+
+    // Kiểm tra xem phòng còn lịch bảo trì đang active nào khác không
+    const [activeBlock] = await this.dataSource.query(
+      `SELECT id FROM room_blocks WHERE room_id = ? AND from_at <= NOW() AND (to_at IS NULL OR to_at >= NOW()) LIMIT 1`,
+      [roomId],
+    );
+
+    if (!activeBlock) {
+      // Nếu không còn block active nào, cập nhật status về available nếu đang là maintenance
+      await this.dataSource.query(
+        `UPDATE ROOMS SET status = 'available', updated_at = NOW() WHERE room_id = ? AND status = 'maintenance'`,
+        [roomId],
+      );
+    }
+
+    await this.auditLogService.log({
+      actor,
+      action: 'DELETE_ROOM_BLOCK',
+      entity_type: 'room_blocks',
+      entity_id: blockId,
+      old_value: block,
+      new_value: null,
+    });
+
+    return { success: true, message: 'Đã gỡ lịch bảo trì phòng thành công.' };
+  }
+
+  // ==========================================================================
+  // G. GÁN HÀNG LOẠT (BULK OPERATIONS - CHỈ ADMIN)
+  // ==========================================================================
+
+  async bulkAssignFeatures(dto: BulkFeatureDto, actor: string) {
+    if (!dto.room_ids || !Array.isArray(dto.room_ids) || dto.room_ids.length === 0) {
+      throw new BadRequestException('Danh sách phòng (room_ids) không được để trống.');
+    }
+
+    const rooms = await this.dataSource.query(
+      `SELECT room_id FROM ROOMS WHERE room_id IN (?) AND deleted_at IS NULL`,
+      [dto.room_ids],
+    );
+    const validRoomIds = rooms.map((r: any) => r.room_id);
+
+    // Gán thêm đặc điểm
+    if (dto.add_feature_ids && dto.add_feature_ids.length > 0) {
+      for (const roomId of validRoomIds) {
+        for (const featId of dto.add_feature_ids) {
+          await this.dataSource.query(
+            `INSERT IGNORE INTO room_feature_map (room_id, feature_id) VALUES (?, ?)`,
+            [roomId, featId],
+          );
+        }
+      }
+    }
+
+    // Gỡ bớt đặc điểm
+    if (dto.remove_feature_ids && dto.remove_feature_ids.length > 0) {
+      for (const roomId of validRoomIds) {
+        await this.dataSource.query(
+          `DELETE FROM room_feature_map WHERE room_id = ? AND feature_id IN (?)`,
+          [roomId, dto.remove_feature_ids],
+        );
+      }
+    }
+
+    await this.auditLogService.log({
+      actor,
+      action: 'BULK_ASSIGN_FEATURES',
+      entity_type: 'ROOMS',
+      entity_id: 0,
+      new_value: dto,
+    });
+
+    return {
+      success: true,
+      count: validRoomIds.length,
+      message: `Đã cập nhật đặc điểm cho ${validRoomIds.length} phòng.`,
+    };
+  }
+
+  async bulkAssignGroup(dto: BulkGroupDto, actor: string) {
+    if (!dto.room_ids || !Array.isArray(dto.room_ids) || dto.room_ids.length === 0) {
+      throw new BadRequestException('Danh sách phòng (room_ids) không được để trống.');
+    }
+
+    if (dto.room_group_id !== null && dto.room_group_id !== undefined) {
+      const [rg] = await this.dataSource.query(
+        `SELECT id FROM room_groups WHERE id = ? AND is_active = 1`,
+        [dto.room_group_id],
+      );
+      if (!rg) {
+        throw new BadRequestException(`Nhóm phòng #${dto.room_group_id} không tồn tại hoặc đã bị vô hiệu hóa.`);
+      }
+    }
+
+    await this.dataSource.query(
+      `UPDATE ROOMS SET room_group_id = ?, updated_at = NOW() WHERE room_id IN (?) AND deleted_at IS NULL`,
+      [dto.room_group_id || null, dto.room_ids],
+    );
+
+    await this.auditLogService.log({
+      actor,
+      action: 'BULK_ASSIGN_GROUP',
+      entity_type: 'ROOMS',
+      entity_id: 0,
+      new_value: dto,
+    });
+
+    return {
+      success: true,
+      count: dto.room_ids.length,
+      message: `Đã gán nhóm phòng cho ${dto.room_ids.length} phòng.`,
+    };
+  }
+
+  // ==========================================================================
+  // H. TẠO NHIỀU PHÒNG NÂNG CẤP (BATCH CREATE V2 - MULTI-GROUP & FEATURES)
+  // ==========================================================================
+
+  async newBatchCreateRooms(dto: NewBatchCreateRoomsDto, actor: string) {
+    if (!dto.apartment_id) {
+      throw new BadRequestException('Chi nhánh (apartment_id) là bắt buộc.');
+    }
+    if (!dto.groups || !Array.isArray(dto.groups) || dto.groups.length === 0) {
+      throw new BadRequestException('Cần ít nhất một nhóm phòng trong danh sách tạo.');
+    }
+
+    // 1. Kiểm tra chi nhánh
+    const [apartment] = await this.dataSource.query(`SELECT id, name FROM APARTMENT WHERE id = ?`, [
+      dto.apartment_id,
+    ]);
+    if (!apartment) {
+      throw new BadRequestException(`Chi nhánh #${dto.apartment_id} không tồn tại.`);
+    }
+
+    // 2. Chuyển đổi dữ liệu sang format của buildBatchPlan
+    const batchGroups = dto.groups.map((g) => ({
+      label: g.label || 'Nhóm',
+      roomGroupId: g.roomGroupId || null,
+      roomTypeId: g.roomTypeId,
+      featureIds: g.featureIds || [],
+      note: g.note || '',
+      roomNumbers: g.roomNumbers || [],
+    }));
+
+    const commonConfig = {
+      defaultStatus: dto.default_status || 'available',
+      commonFeatureIds: dto.common_feature_ids || [],
+    };
+
+    const planResult = buildBatchPlan(batchGroups, commonConfig);
+
+    const errors: Array<{ group: string; roomNumber: string; code: string; message: string }> = [];
+
+    // Thêm các lỗi từ parser/planner
+    for (const pe of planResult.errors) {
+      errors.push({
+        group: 'Cấu hình',
+        roomNumber: '-',
+        code: 'SYNTAX',
+        message: pe,
+      });
+    }
+
+    // Báo lỗi trùng giữa các nhóm
+    for (const dup of planResult.duplicatesWithinBatch) {
+      errors.push({
+        group: 'Nhiều nhóm',
+        roomNumber: dup,
+        code: 'DUPLICATE_IN_BATCH',
+        message: `Số phòng ${dup} bị xuất hiện trùng lặp giữa các nhóm trong đợt tạo này.`,
+      });
+    }
+
+    // Kiểm tra giới hạn tối đa 100 phòng
+    if (planResult.plan.length > 100) {
+      errors.push({
+        group: 'Toàn đợt',
+        roomNumber: '-',
+        code: 'LIMIT_EXCEEDED',
+        message: `Tổng số phòng tạo một lần (${planResult.plan.length}) vượt quá giới hạn tối đa cho phép (100 phòng).`,
+      });
+    }
+
+    // 3. Kiểm tra các loại phòng và nhóm phòng trong DB
+    const roomTypeIds = Array.from(new Set(batchGroups.map((g) => g.roomTypeId)));
+    for (const rtId of roomTypeIds) {
+      const [rt] = await this.dataSource.query(
+        `SELECT id, name, apartment_id, is_active FROM room_types WHERE id = ?`,
+        [rtId],
+      );
+      if (!rt) {
+        errors.push({
+          group: 'Loại phòng',
+          roomNumber: '-',
+          code: 'INVALID_ROOM_TYPE',
+          message: `Không tìm thấy loại phòng #${rtId}.`,
+        });
+      } else if (Number(rt.apartment_id) !== Number(dto.apartment_id)) {
+        errors.push({
+          group: 'Loại phòng',
+          roomNumber: '-',
+          code: 'INVALID_ROOM_TYPE',
+          message: `Loại phòng "${rt.name}" không thuộc chi nhánh #${dto.apartment_id}.`,
+        });
+      }
+    }
+
+    // Kiểm tra các nhóm phòng
+    const roomGroupIds = Array.from(
+      new Set(batchGroups.map((g) => g.roomGroupId).filter((id): id is number => id !== null && id !== undefined)),
+    );
+    for (const rgId of roomGroupIds) {
+      const [rg] = await this.dataSource.query(
+        `SELECT id, name, is_active FROM room_groups WHERE id = ?`,
+        [rgId],
+      );
+      if (!rg || !rg.is_active) {
+        errors.push({
+          group: 'Nhóm phòng',
+          roomNumber: '-',
+          code: 'INVALID_FEATURE',
+          message: `Nhóm phòng #${rgId} không tồn tại hoặc đã bị vô hiệu hóa.`,
+        });
+      }
+    }
+
+    // 4. Kiểm tra trùng với các phòng đã có trong DB
+    const existingRooms = await this.dataSource.query(
+      `SELECT room_number FROM ROOMS WHERE apartment_id = ? AND deleted_at IS NULL`,
+      [dto.apartment_id],
+    );
+    const existingNumbers = new Set(existingRooms.map((r: any) => normalizeRoomNumber(r.room_number)));
+
+    for (const r of planResult.plan) {
+      if (existingNumbers.has(r.roomNumber)) {
+        errors.push({
+          group: r.label,
+          roomNumber: r.roomNumber,
+          code: 'DUPLICATE_EXISTING',
+          message: `Số phòng ${r.roomNumber} đã tồn tại tại chi nhánh này.`,
+        });
+      }
+    }
+
+    // NẾU LÀ DRY RUN
+    if (dto.dry_run) {
+      return {
+        success: errors.length === 0,
+        totalPlanned: planResult.plan.length,
+        errors,
+        plan: planResult.plan,
+      };
+    }
+
+    // Nếu không phải dry-run và có lỗi -> ném ngoại lệ
+    if (errors.length > 0) {
+      throw new BadRequestException({
+        message: 'Dữ liệu tạo nhiều phòng không hợp lệ. Vui lòng kiểm tra lại danh sách lỗi.',
+        errors,
+      });
+    }
+
+    // 5. THỰC HIỆN LƯU VÀO DATABASE BẰNG 1 TRANSACTION
+    const queryRunner = this.dataSource.createQueryRunner();
+    await queryRunner.connect();
+    await queryRunner.startTransaction();
+
+    try {
+      const createdRooms: string[] = [];
+      const itemStatus = dto.default_status || 'available';
+
+      for (const item of planResult.plan) {
+        // Double-check race condition
+        const [dupCheck] = await queryRunner.query(
+          `SELECT room_id FROM ROOMS WHERE apartment_id = ? AND room_number = ? AND deleted_at IS NULL FOR UPDATE`,
+          [dto.apartment_id, item.roomNumber],
+        );
+        if (dupCheck) {
+          throw new BadRequestException(
+            `Xung đột đồng thời: Số phòng ${item.roomNumber} vừa được tạo bởi người khác. Vui lòng thử lại.`,
+          );
+        }
+
+        const insertRes = await queryRunner.query(
+          `INSERT INTO ROOMS (apartment_id, room_type_id, room_number, floor, room_group_id, note, housekeeping, status, is_hidden, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, 'clean', ?, 0, NOW(), NOW())`,
+          [
+            dto.apartment_id,
+            item.roomTypeId,
+            item.roomNumber,
+            item.floor ?? 0,
+            item.roomGroupId || null,
+            item.note?.trim() || null,
+            itemStatus,
+          ],
+        );
+        const newRoomId = insertRes.insertId;
+
+        // Lưu features
+        if (item.featureIds && item.featureIds.length > 0) {
+          for (const featId of item.featureIds) {
+            await queryRunner.query(
+              `INSERT IGNORE INTO room_feature_map (room_id, feature_id) VALUES (?, ?)`,
+              [newRoomId, featId],
+            );
+          }
+        }
+
+        // Tạo room_block nếu trạng thái là maintenance
+        if (itemStatus === 'maintenance') {
+          await queryRunner.query(
+            `INSERT INTO room_blocks (room_id, from_at, to_at, reason, created_by, created_at)
+             VALUES (?, NOW(), NULL, 'Khởi tạo bảo trì khi tạo hàng loạt', ?, NOW())`,
+            [newRoomId, actor],
+          );
+        }
+
+        createdRooms.push(item.roomNumber);
+      }
+
+      await queryRunner.commitTransaction();
+
+      // Ghi 1 dòng audit log cho cả đợt
+      await this.auditLogService.log({
+        actor,
+        action: 'BATCH_CREATE_ROOMS_V2',
+        entity_type: 'ROOMS',
+        entity_id: dto.apartment_id,
+        new_value: {
+          apartment_id: dto.apartment_id,
+          total_created: createdRooms.length,
+          groups_count: dto.groups.length,
+          created_rooms: createdRooms,
+        },
+      });
+
+      return {
+        success: true,
+        createdCount: createdRooms.length,
+        createdRooms,
+        message: `Đã tạo thành công ${createdRooms.length} phòng mới cho chi nhánh "${apartment.name}".`,
+      };
+    } catch (err) {
+      await queryRunner.rollbackTransaction();
+      throw err;
+    } finally {
+      await queryRunner.release();
+    }
   }
 }

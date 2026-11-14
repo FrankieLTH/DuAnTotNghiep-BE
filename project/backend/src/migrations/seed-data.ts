@@ -43,8 +43,31 @@ export interface SeedPayload {
     apartment_id: number;
     room_type_id: number;
     room_number: string;
+    floor: number;
+    room_group_id?: number | null;
+    note?: string | null;
+    housekeeping: 'clean' | 'dirty';
     status: RoomStatus;
     is_hidden: boolean;
+  }>;
+  roomGroups: Array<{
+    id: number;
+    name: string;
+    is_active: boolean;
+  }>;
+  roomFeatures: Array<{
+    id: number;
+    name: string;
+    category: 'view' | 'sunlight' | 'comfort' | 'amenity';
+    is_active: boolean;
+  }>;
+  roomBlocks: Array<{
+    id: number;
+    room_id: number;
+    from_at: string;
+    to_at: string | null;
+    reason: string;
+    created_by: string;
   }>;
   locks: Array<{
     id: number;
@@ -202,6 +225,10 @@ export function generateSeedData(): SeedPayload {
         apartment_id: rt.apartment_id,
         room_type_id: rt.id,
         room_number: roomNum,
+        floor: floor,
+        room_group_id: ((roomIdCounter - 1) % 6) + 1,
+        note: null,
+        housekeeping: 'clean',
         status: isMaint ? RoomStatus.MAINTENANCE : RoomStatus.AVAILABLE,
         is_hidden: false,
       });
@@ -221,6 +248,56 @@ export function generateSeedData(): SeedPayload {
       lockIdCounter++;
     }
   });
+
+  // 3.1 Room Groups & Room Features & Room Blocks
+  const roomGroups: SeedPayload['roomGroups'] = [
+    { id: 1, name: 'Phòng góc', is_active: true },
+    { id: 2, name: 'Hành lang', is_active: true },
+    { id: 3, name: 'Giữa dãy', is_active: true },
+    { id: 4, name: 'Cuối dãy', is_active: true },
+    { id: 5, name: 'Gần cầu thang', is_active: true },
+    { id: 6, name: 'Gần thang máy', is_active: true },
+  ];
+
+  const roomFeatures: SeedPayload['roomFeatures'] = [
+    { id: 1, name: 'View biển trực diện', category: 'view', is_active: true },
+    { id: 2, name: 'View biển một phần', category: 'view', is_active: true },
+    { id: 3, name: 'View hồ bơi', category: 'view', is_active: true },
+    { id: 4, name: 'View núi', category: 'view', is_active: true },
+    { id: 5, name: 'View vườn', category: 'view', is_active: true },
+    { id: 6, name: 'Đón nắng sáng', category: 'sunlight', is_active: true },
+    { id: 7, name: 'Hoàng hôn', category: 'sunlight', is_active: true },
+    { id: 8, name: 'Đón gió biển', category: 'sunlight', is_active: true },
+    { id: 9, name: 'Yên tĩnh', category: 'comfort', is_active: true },
+    { id: 10, name: 'Nhiều cửa sổ / thoáng', category: 'comfort', is_active: true },
+    { id: 11, name: 'Cách âm tốt', category: 'comfort', is_active: true },
+    { id: 12, name: 'Ban công riêng', category: 'amenity', is_active: true },
+    { id: 13, name: 'Cửa kính sát sàn', category: 'amenity', is_active: true },
+    { id: 14, name: 'Bồn tắm ngâm', category: 'amenity', is_active: true },
+    { id: 15, name: 'Jacuzzi riêng', category: 'amenity', is_active: true },
+    { id: 16, name: 'Gác lửng', category: 'amenity', is_active: true },
+    { id: 17, name: 'Bếp nhỏ', category: 'amenity', is_active: true },
+    { id: 18, name: 'Phòng thông nhau', category: 'amenity', is_active: true },
+  ];
+
+  const roomBlocks: SeedPayload['roomBlocks'] = [
+    {
+      id: 1,
+      room_id: 6,
+      from_at: '2026-11-01T00:00:00Z',
+      to_at: null,
+      reason: 'Chuyển từ trạng thái cũ',
+      created_by: 'SYSTEM',
+    },
+    {
+      id: 2,
+      room_id: 20,
+      from_at: '2026-11-01T00:00:00Z',
+      to_at: null,
+      reason: 'Chuyển từ trạng thái cũ',
+      created_by: 'SYSTEM',
+    },
+  ];
 
   // 4. Roles & Staff
   const roles = [
@@ -1250,6 +1327,9 @@ export function generateSeedData(): SeedPayload {
     branches,
     roomTypes,
     rooms,
+    roomGroups,
+    roomFeatures,
+    roomBlocks,
     locks,
     roles,
     staff,

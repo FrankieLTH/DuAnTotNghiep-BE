@@ -7,6 +7,27 @@ export * from './date-filters';
 export * from './helpers/roomSuggestion';
 export * from './helpers/roomNumbering';
 export {
+  normalizeRoomNumber,
+  suggestFloor,
+  parseRoomNumberInput,
+  generateRoomNumbers,
+  buildBatchPlan,
+  computeRoomDisplayStatus,
+  aggregateRoomTypeFeatures,
+  sortRoomsNatural as sortRoomsNaturalNew,
+} from './rooms';
+export type {
+  RoomBlock as SharedRoomBlock,
+  RoomDisplayStatus,
+  ParseRoomNumberResult,
+  GenerateRoomNumbersOptions,
+  BatchRoomGroup,
+  BatchCommonConfig,
+  BatchRoomPlan,
+  BatchPlanResult,
+  AggregatedFeature,
+} from './rooms';
+export {
   calculateRoomPrice,
   calculateNights,
   calculateVoucherDiscount,
@@ -29,6 +50,7 @@ export type {
   BookingRoomItem,
   BookingItem,
 } from './helpers/baskets';
+
 
 
 

@@ -3,7 +3,16 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { AdminService } from './admin.service';
 import { AdminController } from './admin.controller';
 import { Booking, Payment, Refund, Lock, LockPin } from '../../entities/booking.entity';
-import { Room, Apartment, RoomType, RoomImage, Service } from '../../entities/room.entity';
+import {
+  Room,
+  Apartment,
+  RoomType,
+  RoomImage,
+  Service,
+  RoomGroup,
+  RoomFeature,
+  RoomBlock,
+} from '../../entities/room.entity';
 import { User, Customer, Staff } from '../../entities/user.entity';
 import { AuditLogService } from './audit-log.service';
 import { AutoRoomAssignmentService } from './auto-room-assignment.service';
@@ -34,6 +43,9 @@ import { PermissionsGuard } from '../../common/guards/permissions.guard';
       Staff,
       Lock,
       LockPin,
+      RoomGroup,
+      RoomFeature,
+      RoomBlock,
     ]),
   ],
   providers: [
