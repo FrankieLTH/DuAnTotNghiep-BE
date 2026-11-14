@@ -72,7 +72,7 @@ export const CustomersScreen: React.FC<CustomersScreenProps> = ({ currentUser, o
   const viewCustomer = async (c: AdminCustomerItem) => {
     try {
       const history = await adminApi.getCustomerHistory(c.id, currentUser.role);
-      setSelectedCustomer({ ...c, bookings: history?.bookings ?? [] });
+      setSelectedCustomer({ ...c, ...history?.customer, bookings: history?.bookings ?? [] });
     } catch {
       setSelectedCustomer({ ...c, bookings: [] });
     }
@@ -224,7 +224,7 @@ export const CustomersScreen: React.FC<CustomersScreenProps> = ({ currentUser, o
                 </td>
                 <td className="py-2.5 px-3.5">
                   <Badge variant={c.account_type === 'REGISTERED' ? 'info' : 'neutral'} size="sm">
-                    {c.account_type === 'REGISTERED' ? 'Đã kích hoạt' : 'Khách vãng lai'}
+                    {c.account_type === 'REGISTERED' ? 'Có tài khoản' : c.account_type === 'GUEST_UNACTIVATED' ? 'Khách vãng lai' : 'Chưa xác định'}
                   </Badge>
                 </td>
                 <td className="py-2.5 px-3.5 text-xs text-[#78716C]">{formatDate(c.created_at)}</td>
@@ -319,7 +319,7 @@ export const CustomersScreen: React.FC<CustomersScreenProps> = ({ currentUser, o
               <div>
                 <div className="text-[#78716C] mb-0.5">Loại tài khoản</div>
                 <Badge variant={selectedCustomer.account_type === 'REGISTERED' ? 'info' : 'neutral'} size="sm">
-                  {selectedCustomer.account_type === 'REGISTERED' ? 'Đã kích hoạt' : 'Khách vãng lai'}
+                  {selectedCustomer.account_type === 'REGISTERED' ? 'Có tài khoản' : selectedCustomer.account_type === 'GUEST_UNACTIVATED' ? 'Khách vãng lai' : 'Chưa xác định'}
                 </Badge>
               </div>
               <div>

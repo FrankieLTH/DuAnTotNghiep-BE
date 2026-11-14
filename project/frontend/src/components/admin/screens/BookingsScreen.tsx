@@ -1,3 +1,4 @@
+import { CustomerRequestsPanel } from '../CustomerRequestsPanel';
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   TableContainer,
@@ -1373,6 +1374,7 @@ export const BookingsScreen: React.FC<BookingsScreenProps> = ({
   // ============================================================
   return (
     <div className="space-y-5">
+      <CustomerRequestsPanel currentUser={currentUser} selectedBranchId={selectedBranchId} />
       {/* ===== HEADER & TOP ACTIONS ===== */}
       <div className="flex items-center justify-between gap-3">
         <div>

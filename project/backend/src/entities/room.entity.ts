@@ -79,8 +79,9 @@ export class Room {
   @PrimaryGeneratedColumn({ name: 'room_id' })
   id: number;
 
-  @Column({ name: 'room_id', insert: false, update: false })
-  room_id: number;
+  // Keep the legacy property without mapping the same database column twice.
+  get room_id(): number { return this.id; }
+  set room_id(value: number) { this.id = value; }
 
   @Column()
   apartment_id: number;

@@ -239,6 +239,9 @@ export class Booking {
   @Column({ type: 'text', nullable: true })
   note: string;
 
+  @Column({ type: 'json', nullable: true })
+  checkout_data: { booker?: { full_name: string; email: string; phone: string; is_staying: boolean; consent_data_protection: boolean }; guests?: any[]; requests?: any[] };
+
   @Column({ type: 'text', nullable: true })
   cancel_reason: string;
 
@@ -552,7 +555,7 @@ export class Refund {
   @PrimaryGeneratedColumn()
   id: number;
 
-  @Column()
+  @Column({ nullable: true })
   payment_id: number;
 
   @Column()

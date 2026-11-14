@@ -37,13 +37,15 @@ export class BookingsController {
     return this.bookingsService.getUserBookings(req.user.userId);
   }
 
+  @UseGuards(JwtAuthGuard)
   @Get(':id')
-  async getBookingById(@Param('id', ParseIntPipe) id: number) {
-    return this.bookingsService.getBookingById(id);
+  async getBookingById(@Param('id', ParseIntPipe) id: number, @Request() req) {
+    return this.bookingsService.getBookingById(id, req.user.userId);
   }
 
+  @UseGuards(JwtAuthGuard)
   @Put(':id/cancel')
-  async cancelBooking(@Param('id', ParseIntPipe) id: number, @Body() body: { reason?: string }) {
-    return this.bookingsService.cancelBooking(id, body?.reason);
+  async cancelBooking(@Param('id', ParseIntPipe) id: number, @Body() body: { reason?: string }, @Request() req) {
+    return this.bookingsService.cancelBooking(id, body?.reason, req.user.userId);
   }
 }

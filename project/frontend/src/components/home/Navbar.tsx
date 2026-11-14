@@ -36,7 +36,7 @@ export const Navbar: React.FC<NavbarProps> = ({
     <>
       {/* THANH MENU NAV NGANG LỚN HƠN, NỀN NÂU ĐEN ĐẶC KHÔNG BỊ CHÌM VÀO NỀN TRẮNG */}
       <header className="fixed top-0 left-0 right-0 z-40 bg-[#191412] text-white shadow-xl border-b border-[#33231B] py-4 sm:py-4.5 font-sans transition-all">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 relative flex items-center justify-between min-h-[52px]">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 relative flex flex-wrap items-center justify-between gap-y-3 min-h-[52px]">
           
           {/* 1. BÊN TRÁI: NÚT MENU TO RÕ RÀNG */}
           <div className="flex items-center">
@@ -44,6 +44,8 @@ export const Navbar: React.FC<NavbarProps> = ({
               onClick={() => setMenuOpen(true)}
               className="flex items-center gap-3 px-4 py-2 rounded-xl border border-white/30 hover:border-white/70 bg-white/5 hover:bg-white/15 text-white transition-all cursor-pointer shadow-sm active:scale-95"
               aria-label="Mở menu"
+              aria-expanded={menuOpen}
+              aria-controls="main-menu-drawer"
             >
               <div className="flex flex-col gap-1.5 w-5">
                 <span className="w-full h-0.5 bg-white rounded-full"></span>
@@ -57,7 +59,7 @@ export const Navbar: React.FC<NavbarProps> = ({
           </div>
 
           {/* 2. CHÍNH GIỮA: LOGO ĐỒI BÔNG GÒN LỚN & ĐẲNG CẤP */}
-          <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 text-center pointer-events-auto">
+          <div className="order-first w-full flex justify-center md:order-none md:w-auto md:absolute md:left-1/2 md:top-1/2 md:-translate-x-1/2 md:-translate-y-1/2 text-center pointer-events-auto">
             <button
               onClick={() => handleNav('home')}
               className="flex flex-col items-center justify-center cursor-pointer group"
@@ -81,8 +83,8 @@ export const Navbar: React.FC<NavbarProps> = ({
           </div>
 
           {/* 3. BÊN PHẢI: HOTLINE & NÚT ĐẶT PHÒNG NỔI BẬT */}
-          <div className="flex items-center gap-4 sm:gap-5">
-            <div className="hidden sm:flex flex-col items-end text-right">
+          <div className="flex items-center gap-2 sm:gap-3">
+            <div className="hidden xl:flex flex-col items-end text-right">
               <span className="text-[10px] uppercase tracking-widest text-white/70 font-mono">
                 HOTLINE 24/7
               </span>
@@ -94,6 +96,14 @@ export const Navbar: React.FC<NavbarProps> = ({
               </a>
             </div>
 
+            <button
+              onClick={() => handleNav('my-account')}
+              aria-current={currentView === 'my-account' ? 'page' : undefined}
+              className="flex items-center gap-2 rounded-xl border border-white/40 px-3 sm:px-4 py-2.5 text-xs sm:text-sm font-semibold hover:bg-white/10 transition-colors"
+            >
+              <svg aria-hidden="true" className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 5 5"/></svg>
+              Tra cứu
+            </button>
             <button
               onClick={onOpenBookingModal || (() => handleNav('room-list'))}
               className="bg-[#C4572E] hover:bg-[#b04a24] text-white text-xs sm:text-sm font-semibold px-5 sm:px-6 py-2.5 rounded-xl transition-all transform active:scale-95 cursor-pointer shadow-md border border-[#E07A5F]/40"
@@ -107,6 +117,8 @@ export const Navbar: React.FC<NavbarProps> = ({
 
       {/* MENU DRAWER TRƯỢT MƯỢT MÀ */}
       <div
+        id="main-menu-drawer"
+        aria-hidden={!menuOpen}
         className={`fixed inset-0 z-50 transition-opacity duration-300 ease-out font-sans ${
           menuOpen ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'
         }`}
@@ -158,7 +170,6 @@ export const Navbar: React.FC<NavbarProps> = ({
                 { id: 'room-list', label: 'Danh Sách Phòng & Căn Hộ', sub: 'Bộ sưu tập 6 hạng phòng sẵn sàng đón khách' },
                 { id: 'vouchers', label: 'Ưu Đãi & Voucher', sub: 'Giảm 15% khi đặt từ 2 đêm trực tiếp' },
                 { id: 'locations', label: 'Điểm tham quan lân cận', sub: 'Bản đồ du lịch khám phá Vũng Tàu' },
-                { id: 'my-account', label: 'Tra cứu mã PIN nhận phòng', sub: 'Khóa thông minh TTLock tự động 24/7' },
                 { id: 'admin', label: 'Cổng Quản trị & Sale', sub: 'Hệ thống vận hành & quản lý homestay' },
                 { id: 'support', label: 'Hỗ trợ khách hàng', sub: 'Hotline 0908.888.888 & Chính sách lưu trú' },
               ].map((item) => {

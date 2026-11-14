@@ -8,6 +8,9 @@ import { DataSource } from 'typeorm';
 import { AuditLogService } from './audit-log.service';
 import { StaffContext } from '../../common/config/permissions.config';
 
+// Match account authentication: a non-empty password hash and verified email.
+const ACCOUNT_TYPE_SQL = `CASE WHEN c.password_hash IS NOT NULL AND c.password_hash <> '' AND c.email_verified_at IS NOT NULL THEN 'REGISTERED' ELSE 'GUEST_UNACTIVATED' END`;
+
 export interface CreateCustomerDto {
   full_name: string;
   email: string;
@@ -77,6 +80,9 @@ export class AdminCustomerService {
         c.full_name,
         c.email,
         c.phone,
+        c.account_created_at,
+        c.email_verified_at,
+        ${ACCOUNT_TYPE_SQL} AS account_type,
         c.is_blocked,
         c.is_hidden,
         c.created_at,
@@ -98,6 +104,9 @@ export class AdminCustomerService {
         full_name: r.full_name,
         email: r.email,
         phone: r.phone,
+        account_type: r.account_type,
+        account_created_at: r.account_created_at,
+        email_verified_at: r.email_verified_at,
         is_blocked: Boolean(r.is_blocked),
         is_hidden: Boolean(r.is_hidden),
         created_at: r.created_at,
@@ -116,8 +125,10 @@ export class AdminCustomerService {
    */
   async getCustomerById(customerId: number) {
     const [customer] = await this.dataSource.query(
-      `SELECT customer_id AS id, full_name, email, phone, is_blocked, is_hidden, created_at, updated_at
-       FROM CUSTOMER WHERE customer_id = ?`,
+      `SELECT c.customer_id AS id, c.full_name, c.email, c.phone, c.is_blocked, c.is_hidden,
+              c.created_at, c.updated_at, c.account_created_at, c.email_verified_at,
+              ${ACCOUNT_TYPE_SQL} AS account_type
+       FROM CUSTOMER c WHERE c.customer_id = ?`,
       [customerId],
     );
     if (!customer) {

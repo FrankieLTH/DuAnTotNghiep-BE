@@ -55,8 +55,8 @@ export class AvailabilityService {
         FROM BOOKINGS b
         LEFT JOIN Booking_rooms br ON br.bookings_id = b.id
         LEFT JOIN ROOMS r_sub ON r_sub.room_id = b.room_id
-        WHERE b.booking_status IN ('confirmed', 'checked_in', 'pending_payment')
-          AND (b.booking_status != 'pending_payment' OR b.hold_expires_at > NOW())
+        WHERE b.booking_status IN ('confirmed', 'checked_in', 'pending_payment', 'draft')
+          AND (b.booking_status NOT IN ('draft', 'pending_payment') OR b.hold_expires_at > NOW())
           AND (
             (b.start_at IS NOT NULL AND b.start_at < ? AND b.end_at > ?)
             OR (b.booked_start_time < ? AND b.booked_end_time > ?)

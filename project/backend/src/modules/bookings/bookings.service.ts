@@ -144,13 +144,13 @@ export class BookingsService {
     return result;
   }
 
-  async getBookingById(id: number) {
+  async getBookingById(id: number, userId?: number) {
     const b = await this.bookingRepository.findOne({
       where: { id },
       relations: ['room', 'room.apartment', 'voucher'],
     });
 
-    if (!b) {
+    if (!b || !userId || b.user_id !== userId) {
       throw new NotFoundException('Không tìm thấy thông tin đơn đặt phòng');
     }
 
@@ -176,9 +176,9 @@ export class BookingsService {
     };
   }
 
-  async cancelBooking(id: number, reason?: string) {
+  async cancelBooking(id: number, reason?: string, userId?: number) {
     const booking = await this.bookingRepository.findOne({ where: { id } });
-    if (!booking) {
+    if (!booking || !userId || booking.user_id !== userId) {
       throw new NotFoundException('Không tìm thấy đơn đặt phòng');
     }
 

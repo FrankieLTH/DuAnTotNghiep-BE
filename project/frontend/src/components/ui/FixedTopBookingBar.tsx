@@ -97,7 +97,7 @@ export const FixedTopBookingBar: React.FC<FixedTopBookingBarProps> = ({
             onClick={onEditSearch}
             className="border border-white/30 hover:border-white hover:bg-white/10 text-white px-3 py-1 rounded text-xs transition-colors cursor-pointer"
           >
-            Sửa tìm kiếm
+            {draft.server_booking_id ? 'Danh sách đơn' : 'Sửa tìm kiếm'}
           </button>
         </div>
       </div>

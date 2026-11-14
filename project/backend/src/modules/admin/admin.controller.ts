@@ -1,3 +1,5 @@
+import { CustomerManagementService } from '../customer/customer-management.service';
+import { ReviewCustomerRequestDto } from '../customer/customer.dto';
 import {
   Controller,
   Get,
@@ -30,6 +32,7 @@ import { AdminRoomService, CreateRoomTypeDto, UpdateRoomTypeDto, CreateRoomDto, 
 @UseGuards(PermissionsGuard)
 export class AdminController {
   constructor(
+    private readonly customerManagement: CustomerManagementService,
     private readonly bookingService: AdminBookingService,
     private readonly autoAssignService: AutoRoomAssignmentService,
     private readonly retentionService: RetentionJobsService,
@@ -41,6 +44,16 @@ export class AdminController {
     private readonly roomService: AdminRoomService,
     private readonly realtimeSyncService: RealtimeSyncService,
   ) {}
+
+  @Get('customer-requests')
+  @RequirePermissions(Permission.BOOKINGS_VIEW)
+  customerRequests(@CurrentStaff() staff: StaffContext) { return this.customerManagement.staffRequests(staff); }
+
+  @Put('customer-requests/:id')
+  @RequirePermissions(Permission.BOOKINGS_VIEW)
+  reviewCustomerRequest(@CurrentStaff() staff: StaffContext, @Param('id', ParseIntPipe) id: number, @Body() body: ReviewCustomerRequestDto) {
+    return this.customerManagement.reviewRequest(staff, id, body);
+  }
 
   // ============================================================
   // 1. QUẢN LÝ CHI NHÁNH (BRANCHES / APARTMENT)
