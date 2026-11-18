@@ -32,6 +32,7 @@ export const RoomListPage: React.FC<RoomListPageProps> = ({
   const [apartments, setApartments] = useState<ApartmentItem[]>([]);
   const [rooms, setRooms] = useState<RoomItem[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
+  const [loadError, setLoadError] = useState(false);
   const [holdingId, setHoldingId] = useState<number | null>(null);
   const [capacityError, setCapacityError] = useState<string | null>(null);
 
@@ -58,11 +59,13 @@ export const RoomListPage: React.FC<RoomListPageProps> = ({
     async function loadData() {
       try {
         setLoading(true);
+        setLoadError(false);
         const [rData, aData] = await Promise.all([getRooms(), getApartments()]);
         setRooms(rData);
         setApartments(aData);
       } catch (err) {
         console.error('Error fetching rooms:', err);
+        setLoadError(true);
       } finally {
         setLoading(false);
       }
@@ -77,135 +80,15 @@ export const RoomListPage: React.FC<RoomListPageProps> = ({
     }
   };
 
-  // Danh sách 6 hạng phòng chuẩn - KHÔNG DÙNG ICON EMOJI
-  const featuredRooms = [
-    {
-      id: 1,
-      name: 'Sunset Penthouse & Jacuzzi 270°',
-      branch: 'CN1: Hải Đăng',
-      rating: '5.0',
-      reviewCount: 48,
-      badge: 'SIGNATURE HOMESTAY',
-      subBadge: 'View ngắm hoàng hôn',
-      footerTag: 'Ưu đãi trực tiếp 10% khi đặt hôm nay',
-      badgePhotos: '12 ảnh',
-      description:
-        'Tầng cao ngắm trọn hoàng hôn biển Vũng Tàu 270 độ, trang bị bồn sục Jacuzzi ngoài trời cao cấp và ban công mộc mạc ngát gió biển.',
-      bed: '1 Queen Bed',
-      guests: '2 - 3 Khách',
-      special: 'Jacuzzi 270°',
-      area: '55 m²',
-      price: 1890000,
-      oldPrice: null,
-      maxGuests: 3,
-      image: 'https://images.unsplash.com/photo-1590490360182-c33d57733427?auto=format&fit=crop&w=800&q=80',
-    },
-    {
-      id: 2,
-      name: 'Sea View Balcony Room',
-      branch: 'CN1: Hải Đăng',
-      rating: '4.9',
-      reviewCount: 52,
-      badge: 'ĐẶT NHIỀU CUỐI TUẦN',
-      subBadge: 'View ngắm hoàng hôn',
-      footerTag: 'View ngắm trọn hoàng hôn biển',
-      badgePhotos: 'Hút khách',
-      description:
-        'Ban công rộng nhìn thẳng ra biển Vũng Tàu, ngồi nhâm nhi trà buổi bình minh là một trải nghiệm khó quên cho bất kỳ ai tìm kiếm sự an yên.',
-      bed: '1 King/Queen',
-      guests: '2 Khách',
-      special: 'Ban công biển',
-      area: '42 m²',
-      price: 850000,
-      oldPrice: 1050000,
-      maxGuests: 2,
-      image: 'https://images.unsplash.com/photo-1566665797739-1674de7a421a?auto=format&fit=crop&w=800&q=80',
-    },
-    {
-      id: 3,
-      name: 'The Cotton Cloud Suite',
-      branch: 'CN1: Hải Đăng',
-      rating: '4.9',
-      reviewCount: 41,
-      badge: 'FAVORITE COUPLES',
-      subBadge: 'Ngắm sao trời',
-      footerTag: 'Bồn tắm lộ thiên ngoài trời & Tivi 4K',
-      badgePhotos: 'Lãng mạn',
-      description:
-        'Không gian ngập tràn ánh sáng với giường bông êm ái, bồn tắm view ban công ngắm sao trời, dành riêng cho những cặp đôi tận hưởng kỳ nghỉ.',
-      bed: '1 Giường King',
-      guests: '2 Khách',
-      special: 'Rạp mini 4K',
-      area: '45 m²',
-      price: 920000,
-      oldPrice: null,
-      maxGuests: 2,
-      image: 'https://images.unsplash.com/photo-1582719478250-c89cae4dc85b?auto=format&fit=crop&w=800&q=80',
-    },
-    {
-      id: 4,
-      name: 'The Family Attic & Terrace',
-      branch: 'CN1: Hải Đăng',
-      rating: '4.93',
-      reviewCount: 32,
-      badge: 'BEST SELLER GIA ĐÌNH',
-      subBadge: 'Căn hộ gác mái',
-      footerTag: 'Bếp nấu riêng biệt • Sân hiên BBQ',
-      badgePhotos: '2 phòng ngủ',
-      description:
-        'Căn hộ 2 tầng lý tưởng cho gia đình, mang hơi thở mộc mạc đầy đủ nhà bếp riêng và ban công nướng BBQ rộng rãi ngắm view phố biển.',
-      bed: '2 Phòng ngủ',
-      guests: '4 - 6 Khách',
-      special: 'Bếp BBQ riêng',
-      area: '85 m²',
-      price: 1250000,
-      oldPrice: null,
-      maxGuests: 6,
-      image: 'https://images.unsplash.com/photo-1600585154340-be6161a56a0c?auto=format&fit=crop&w=800&q=80',
-    },
-    {
-      id: 5,
-      name: 'The Garden Suite (Trệt & Sân Hiên Đá)',
-      branch: 'CN1: Thiền Môn',
-      rating: '4.96',
-      reviewCount: 29,
-      badge: 'GẦN GŨI THIÊN NHIÊN',
-      subBadge: 'Sân hiên riêng đá',
-      footerTag: 'Sân vườn riêng biệt mộc mạc',
-      badgePhotos: 'Yên tĩnh',
-      description:
-        'Sân hiên vườn rợp bóng cây cỏ nhiệt đới, băng ghế bên ngoài hiên mộc mạc đón những làn gió tự nhiên lành lạnh của triền núi Vũng Tàu.',
-      bed: '1 Giường King',
-      guests: '2 Khách',
-      special: 'Bồn tắm mộc',
-      area: '50 m²',
-      price: 950000,
-      oldPrice: null,
-      maxGuests: 2,
-      image: 'https://images.unsplash.com/photo-1618773928121-c32242e63f39?auto=format&fit=crop&w=800&q=80',
-    },
-    {
-      id: 6,
-      name: 'Hillside Studio & Workspace',
-      branch: 'CN2: Retreat',
-      rating: '4.91',
-      reviewCount: 37,
-      badge: 'LÀM VIỆC & NGHỈ DƯỠNG',
-      subBadge: 'Wifi 100Mbps',
-      footerTag: 'Bàn làm việc sồi tự nhiên • Cửa sổ Panorama',
-      badgePhotos: 'Yên tĩnh',
-      description:
-        'Bàn làm việc gỗ sồi rộng rãi nhìn ra hướng núi, điện thoả mãn nhu cầu làm việc tự do hay trốn phố tìm sự an tĩnh và năng lượng sáng tạo mới.',
-      bed: '1 Giường Queen',
-      guests: '2 Khách',
-      special: 'Bàn sồi/Núi',
-      area: '38 m²',
-      price: 880000,
-      oldPrice: null,
-      maxGuests: 2,
-      image: 'https://images.unsplash.com/photo-1598928506311-c55ded91a20c?auto=format&fit=crop&w=800&q=80',
-    },
-  ];
+  // Một thẻ cho mỗi nhóm loại phòng; khách chọn biến thể trong trang chi tiết.
+  const featuredRooms = [...new Map(rooms.filter(r => !currentFilter.branchId || r.apartment_id === currentFilter.branchId).sort((a,b)=>b.base_price-a.base_price).map(r => [`${r.apartment_id}:${r.room_type_parent_id || r.room_type_id}`, r])).values()].map(r => ({
+    id: r.id, name: r.room_type_parent_name || r.room_type_name, branch: r.apartment_name, rating: '—', reviewCount: 0,
+    badge: 'LOẠI PHÒNG', subBadge: r.bed_type, footerTag: 'Chọn ngày và biến thể ở trang chi tiết',
+    badgePhotos: 'Ảnh loại phòng', description: r.description, bed: r.bed_type,
+    guests: `Tối đa ${r.max_occupancy} khách`, special: 'Xem biến thể và ngày trống', area: r.area,
+    price: Number(r.base_type_price ?? r.base_price), oldPrice: null as number | null,
+    maxGuests: r.max_occupancy, image: r.images[0] || 'https://images.unsplash.com/photo-1590490360182-c33d57733427?auto=format&fit=crop&w=800&q=80',
+  }));
 
   // Gallery 5 ảnh chi nhánh
   const bentoGallery = [
@@ -317,6 +200,7 @@ export const RoomListPage: React.FC<RoomListPageProps> = ({
         num_rooms: currentFilter.rooms || 1,
         check_in_date: currentFilter.checkIn,
         check_out_date: currentFilter.checkOut,
+        stay_type: currentFilter.stayType || 'fullday',
         nights: 2,
         num_adults: currentFilter.adults,
         num_children: currentFilter.children,
@@ -438,8 +322,10 @@ export const RoomListPage: React.FC<RoomListPageProps> = ({
       room_type_name: firstItem.name || 'Phòng nghỉ',
       room_type_image: firstItem.image || '',
       num_rooms: rec.items.reduce((s, it) => s + it.quantity, 0),
+      booking_rooms: rec.items.map(it => ({room_type_id: it.roomTypeId, room_type_name: it.name || 'Phòng nghỉ', room_type_image: it.image || '', count: it.quantity, room_ids: it.roomIds, price: it.basePrice + (it.featurePricePerNight || 0), max_occupancy: it.maxOccupancy, features: it.features || [], feature_price_per_night: it.featurePricePerNight || 0, has_extra_bed: false, extra_beds: 0})),
       check_in_date: currentFilter.checkIn,
       check_out_date: currentFilter.checkOut,
+        stay_type: currentFilter.stayType || 'fullday',
       nights: calcNights,
       num_adults: currentFilter.adults,
       num_children: currentFilter.children,
@@ -582,7 +468,10 @@ export const RoomListPage: React.FC<RoomListPageProps> = ({
           children: currentFilter.children,
           rooms: currentFilter.rooms || 1,
         }}
-        onSelectRecommendation={handleSelectRecommendation}
+        onSelectRecommendation={(rec) => {
+          const roomId = rec.items[0]?.roomIds?.[0] || rooms.find(r => r.room_type_id === rec.items[0]?.roomTypeId)?.id;
+          if (roomId) onSelectRoomDetail?.(roomId);
+        }}
       />
 
       {/* 4. Section Tiêu Đề Danh Sách */}
@@ -604,6 +493,8 @@ export const RoomListPage: React.FC<RoomListPageProps> = ({
       </div>
 
       {/* 5. Grid 6 Hạng Phòng Đầy Đủ */}
+      {loading && <p className="text-center text-sm text-[#73665C]">Đang tải phòng và giá hiện tại…</p>}
+      {loadError && <p className="text-center text-sm text-[#A83232]">Chưa tải được danh sách phòng. Vui lòng tải lại trang.</p>}
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 mb-16">
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 sm:gap-7">
           {featuredRooms.map((room) => (
@@ -726,7 +617,7 @@ export const RoomListPage: React.FC<RoomListPageProps> = ({
                       </button>
                       <button
                         type="button"
-                        onClick={() => handleBookRoom(room)}
+                        onClick={() => onSelectRoomDetail?.(room.id)}
                         disabled={holdingId === room.id}
                         className="bg-[#C4572E] hover:bg-[#b04a24] text-white px-3.5 py-2.5 rounded-xl text-xs font-semibold uppercase tracking-wider transition-all transform active:scale-95 cursor-pointer shadow-xs hover:shadow-md flex items-center gap-1"
                       >
@@ -782,7 +673,7 @@ export const RoomListPage: React.FC<RoomListPageProps> = ({
               </div>
 
               <button
-                onClick={() => handleBookRoom(featuredRooms[0])}
+                onClick={() => featuredRooms[0] && onSelectRoomDetail?.(featuredRooms[0].id)}
                 className="w-full sm:w-auto bg-[#C4572E] hover:bg-[#b04a24] text-white px-5 py-3 rounded-xl text-xs font-semibold uppercase tracking-wider transition-colors cursor-pointer shadow-md flex items-center justify-center gap-2"
               >
                 <span>Áp dụng mã &amp; Giữ phòng</span>

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { SEED_APARTMENTS, ApartmentItem, SearchParams } from '../../services/dataService';
+import { SEED_APARTMENTS, getApartments, ApartmentItem, SearchParams } from '../../services/dataService';
 
 interface SearchBookingBarProps {
   initialParams?: Partial<SearchParams>;
@@ -12,7 +12,8 @@ export const SearchBookingBar: React.FC<SearchBookingBarProps> = ({
   onSearch,
   className = '',
 }) => {
-  const apartments: ApartmentItem[] = SEED_APARTMENTS;
+  const [apartments,setApartments]=useState<ApartmentItem[]>(SEED_APARTMENTS);
+  useEffect(()=>{let active=true;getApartments().then(rows=>{if(active&&rows.length){setApartments(rows);setBranchId(current=>rows.some(a=>a.id===current)?current:rows[0].id);}}).catch(()=>{});return()=>{active=false;};},[]);
 
   // Format YYYY-MM-DD safely
   const formatDateStr = (d: Date) => {

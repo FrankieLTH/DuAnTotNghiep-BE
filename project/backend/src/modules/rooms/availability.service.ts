@@ -1,94 +1,24 @@
 import { Injectable } from '@nestjs/common';
 import { DataSource } from 'typeorm';
+import { RoomType } from '../../entities/room.entity';
 import { SearchCriteria, AvailableRoomType, computeStayWindow } from '@shared/recommendation';
-
+import { RoomInventoryService } from './room-inventory.service';
 @Injectable()
 export class AvailabilityService {
-  constructor(private readonly dataSource: DataSource) {}
-
-  /**
-   * Tính toán danh sách loại phòng trống cho khung giờ & tiêu chí tìm kiếm
-   * 1 query tổng hợp: COUNT(rooms status ≠ 'maintenance') − COUNT(booking chiếm trùng)
-   * HAVING availableCount > 0
-   */
-  async getAvailableRoomTypes(criteria: SearchCriteria): Promise<AvailableRoomType[]> {
-    const { startAt, endAt } = computeStayWindow(
-      criteria.checkIn,
-      criteria.checkOut,
-      criteria.stayType
-    );
-
-    const params: any[] = [endAt, startAt];
-    let aptFilter = '';
-    if (criteria.apartmentId && Number(criteria.apartmentId) > 0) {
-      aptFilter = 'AND rt.apartment_id = ?';
-      params.push(Number(criteria.apartmentId));
+  constructor(private db:DataSource,private inventory:RoomInventoryService) {}
+  async getAvailableRoomTypes(criteria:SearchCriteria):Promise<AvailableRoomType[]> {
+    const window=computeStayWindow(criteria.checkIn,criteria.checkOut,criteria.stayType);
+    const typeQuery=this.db.getRepository(RoomType).createQueryBuilder('variant').innerJoinAndSelect('variant.parent','parent').where('variant.is_active = 1').andWhere('parent.is_active = 1').andWhere('variant.parent_id IS NOT NULL');
+    if(criteria.apartmentId)typeQuery.andWhere('variant.apartment_id = :apartmentId',{apartmentId:criteria.apartmentId});
+    const types=await typeQuery.getMany();
+    const units=await this.inventory.available(types.map(t=>t.id),new Date(`${window.startAt}+07:00`),new Date(`${window.endAt}+07:00`));
+    const groups=new Map<string,any>();
+    for(const unit of units){const key=String(unit.type.id);let row=groups.get(key);
+      if(!row){row={roomTypeId:unit.type.id,roomId:unit.room.id,roomIds:[],variantKey:key,variantGroup:unit.type.parent?.name||unit.type.name,variantLabel:unit.type.name,parentId:unit.type.parent?.id??unit.type.id,apartmentId:unit.type.apartment_id,apartmentName:unit.room.apartment?.name,name:unit.type.name,maxOccupancy:unit.type.max_occupancy,basePrice:Number(unit.type.base_price),featurePricePerNight:0,features:[],availableCount:0,area:unit.type.area,bedConfig:unit.type.bed_config,image:'',specialFeatures:unit.room.special_features||''};groups.set(key,row);}
+      row.availableCount++;row.roomIds.push(unit.room.id);
     }
-
-    const sql = `
-      SELECT
-        rt.id AS roomTypeId,
-        rt.apartment_id AS apartmentId,
-        apt.name AS apartmentName,
-        rt.name AS name,
-        rt.max_occupancy AS maxOccupancy,
-        CAST(rt.base_price AS DECIMAL(12, 2)) AS basePrice,
-        COALESCE(rt.area, 28) AS area,
-        COALESCE(rt.bed_config, '1 giường đôi') AS bedConfig,
-        (
-          SELECT COALESCE(
-            (SELECT ri.image_url FROM ROOM_IMAGES ri WHERE ri.room_types_id = rt.id LIMIT 1),
-            (SELECT ri2.image_url FROM ROOM_IMAGES ri2 JOIN ROOMS r2 ON ri2.room_id = r2.room_id WHERE r2.room_type_id = rt.id LIMIT 1),
-            'https://images.unsplash.com/photo-1590490360182-c33d57733427?auto=format&fit=crop&w=800&q=80'
-          )
-        ) AS image,
-        (
-          COUNT(DISTINCT r.room_id) - COALESCE(occupied.occupied_count, 0)
-        ) AS availableCount
-      FROM room_types rt
-      JOIN APARTMENT apt ON rt.apartment_id = apt.id
-      JOIN ROOMS r ON r.room_type_id = rt.id AND r.status != 'maintenance' AND r.is_hidden = 0
-      LEFT JOIN (
-        SELECT
-          COALESCE(br.room_types_id, b.room_type_id, r_sub.room_type_id) AS room_type_id,
-          COUNT(DISTINCT COALESCE(br.id, b.id)) AS occupied_count
-        FROM BOOKINGS b
-        LEFT JOIN Booking_rooms br ON br.bookings_id = b.id
-        LEFT JOIN ROOMS r_sub ON r_sub.room_id = b.room_id
-        WHERE b.booking_status IN ('confirmed', 'checked_in', 'pending_payment', 'draft')
-          AND (b.booking_status NOT IN ('draft', 'pending_payment') OR b.hold_expires_at > NOW())
-          AND (
-            (b.start_at IS NOT NULL AND b.start_at < ? AND b.end_at > ?)
-            OR (b.booked_start_time < ? AND b.booked_end_time > ?)
-          )
-        GROUP BY room_type_id
-      ) occupied ON occupied.room_type_id = rt.id
-      WHERE rt.is_active = 1
-        ${aptFilter}
-      GROUP BY rt.id, apt.id, occupied.occupied_count
-      HAVING availableCount > 0
-      ORDER BY basePrice ASC
-    `;
-
-    // params order: [endAt, startAt, endAt, startAt, apartmentId?]
-    const queryParams: any[] = [endAt, startAt, endAt, startAt];
-    if (criteria.apartmentId && Number(criteria.apartmentId) > 0) {
-      queryParams.push(Number(criteria.apartmentId));
-    }
-
-    const rows = await this.dataSource.query(sql, queryParams);
-
-    return rows.map((r: any) => ({
-      roomTypeId: Number(r.roomTypeId),
-      apartmentId: Number(r.apartmentId),
-      apartmentName: String(r.apartmentName),
-      name: String(r.name),
-      maxOccupancy: Number(r.maxOccupancy),
-      basePrice: Number(r.basePrice),
-      availableCount: Math.max(0, Number(r.availableCount)),
-      area: Number(r.area),
-      bedConfig: String(r.bedConfig),
-      image: String(r.image),
-    }));
+    const images=await this.db.query('SELECT room_id,room_types_id,image_url FROM ROOM_IMAGES ORDER BY id');
+    for(const row of groups.values()){row.image=images.find(i=>i.room_id===row.roomId)?.image_url||images.find(i=>i.room_types_id===row.roomTypeId)?.image_url||images.find(i=>i.room_types_id===row.parentId)?.image_url||'';}
+    return [...groups.values()].sort((a,b)=>(a.basePrice*window.priceFactor+a.featurePricePerNight)-(b.basePrice*window.priceFactor+b.featurePricePerNight));
   }
 }

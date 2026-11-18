@@ -1,3 +1,4 @@
+import { RoomsModule } from '../rooms/rooms.module';
 import { Module } from '@nestjs/common';
 import { AuthModule } from '../auth/auth.module';
 import { CustomerAuthService } from './customer-auth.service';
@@ -7,5 +8,5 @@ import { CustomerGuard } from './customer.guard';
 import { CustomerManagementService } from './customer-management.service';
 import { CustomerAccountService } from './customer-account.service';
 import { CustomerMailService } from './customer-mail.service';
-@Module({ imports: [AuthModule], providers: [CustomerAuthService, CustomerAccountService, CustomerMailService, CustomerBookingsService, CustomerManagementService, CustomerGuard], controllers: [CustomerController], exports: [CustomerGuard, CustomerAuthService, CustomerManagementService] })
+@Module({ imports: [AuthModule, RoomsModule], providers: [CustomerAuthService, CustomerAccountService, CustomerMailService, CustomerBookingsService, CustomerManagementService, CustomerGuard], controllers: [CustomerController], exports: [CustomerMailService, CustomerGuard, CustomerAuthService, CustomerManagementService] })
 export class CustomerModule {}

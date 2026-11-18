@@ -5,7 +5,7 @@ import { ScheduleModule } from '@nestjs/schedule';
 import { EventEmitterModule } from '@nestjs/event-emitter';
 
 import { Role, User, Staff, Customer } from './entities/user.entity';
-import { Apartment, RoomType, Room, Amenity, RoomImage, Service } from './entities/room.entity';
+import { Apartment, RoomType, Room, Amenity, RoomImage, Service, RoomFeature } from './entities/room.entity';
 import {
   Lock,
   Voucher,
@@ -49,7 +49,7 @@ import { CronModule } from './modules/cron/cron.module';
         password: config.get<string>('DB_PASSWORD', ''),
         database: config.get<string>('DB_DATABASE', 'duantotnghiep'),
         entities: [
-          Role, User, Staff, Customer, Apartment, RoomType, Room, Amenity, RoomImage, Service,
+          Role, User, Staff, Customer, Apartment, RoomType, Room, Amenity, RoomImage, Service, RoomFeature,
           Lock, Voucher, Booking, BookingGuest, BookingRoom, Transaction, AuditLog, LockPin, PaymentMethod, Payment, Refund, AIChatLog
         ],
         synchronize: false, // Dùng schema MySQL có sẵn

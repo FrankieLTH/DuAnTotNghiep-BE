@@ -1,4 +1,4 @@
-import { Injectable, CanActivate, ExecutionContext, ForbiddenException } from '@nestjs/common';
+import { Injectable, CanActivate, ExecutionContext, ForbiddenException, UnauthorizedException } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { PERMISSIONS_KEY } from '../decorators/permissions.decorator';
 import { Permission, StaffRole, StaffContext, hasPermission } from '../config/permissions.config';
@@ -15,40 +15,25 @@ export class PermissionsGuard implements CanActivate {
 
     const request = context.switchToHttp().getRequest();
 
-    // 1. Lấy thông tin role từ JWT user hoặc header giả lập (x-staff-role)
-    let staffRole: StaffRole = 'manager';
-    const roleHeader = request.headers['x-staff-role']?.toString()?.toLowerCase();
-
-    if (roleHeader === 'admin' || roleHeader === 'manager') {
-      staffRole = roleHeader as StaffRole;
-    } else if (request.user?.role) {
-      staffRole = request.user.role.toLowerCase() === 'admin' ? 'admin' : 'manager';
-    } else if (request.user?.roleId === 1) {
-      staffRole = 'admin';
-    } else if (request.user?.roleId === 2) {
-      staffRole = 'manager';
+    // Admin routes only accept an active STAFF identity verified by JwtStrategy.
+    if (!request.user?.isStaff || ![1, 2].includes(Number(request.user.roleId))) {
+      throw new UnauthorizedException('Đăng nhập bằng tài khoản nhân viên để tiếp tục.');
     }
+    const staffRole: StaffRole = Number(request.user.roleId) === 1 ? 'admin' : 'manager';
 
-    // 2. Lấy apartment_id cho phạm vi chi nhánh (STAFF.apartment_id)
-    let apartmentId: number | null = null;
-    const aptHeader = request.headers['x-staff-apartment-id'];
-    if (aptHeader !== undefined && aptHeader !== null && aptHeader !== '') {
-      apartmentId = Number(aptHeader);
-    } else if (request.user?.apartment_id || request.user?.apartmentId) {
-      apartmentId = Number(request.user.apartment_id || request.user.apartmentId);
-    } else if (staffRole === 'manager') {
-      apartmentId = 1; // Mặc định cho manager cơ sở 1 nếu không truyền
+    // Branch and actor are loaded from the authenticated STAFF row, never request headers.
+    const apartmentId = request.user.apartmentId == null ? null : Number(request.user.apartmentId);
+    if (staffRole === 'manager' && !apartmentId) {
+      throw new ForbiddenException('Tài khoản quản lý chưa được gán chi nhánh.');
     }
-
-    const staffActor =
-      request.headers['x-staff-actor'] || request.user?.email || `${staffRole}_user`;
+    const staffActor = request.user.email;
 
     const staffContext: StaffContext = {
       role: staffRole,
-      apartmentId: staffRole === 'admin' ? (apartmentId || null) : (apartmentId || 1),
+      apartmentId,
       actor: String(staffActor),
       email: request.user?.email,
-      staffId: request.user?.staff_id || request.user?.id,
+      staffId: request.user.staffId,
     };
 
     // Gắn thông tin vào request

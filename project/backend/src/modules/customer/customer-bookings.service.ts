@@ -1,3 +1,5 @@
+import { RoomInventoryService } from '../rooms/room-inventory.service';
+import { isStayBookableNow } from './customer-stay-window';
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { DataSource, In } from 'typeorm';
 import { randomUUID } from 'crypto';
@@ -6,12 +8,12 @@ import { Room, RoomType } from '../../entities/room.entity';
 import { Booking, BookingRoom, BookingGuest, Payment, Transaction, Refund } from '../../entities/booking.entity';
 import { BookingStatus, BookingType, GuestType, GuestSlotStatus } from '@shared/enums';
 import { CustomerBookingQuery, GuestBookingDto, CompleteCheckoutDto, CheckoutBookerDto, SaveGuestDraftDto } from './customer.dto';
-import { computeStayWindow } from '@shared/stay-window';
+import { computeStayWindow } from '@shared/recommendation';
 import { customerNetPaid } from './customer-finance';
 
 @Injectable()
 export class CustomerBookingsService {
-  constructor(private db: DataSource) {}
+  constructor(private db: DataSource, private inventory: RoomInventoryService) {}
   async list(customerId: number, query: CustomerBookingQuery) {
     const page = query.page || 1;
     const [bookings, total] = await this.db.getRepository(Booking).findAndCount({
@@ -56,10 +58,10 @@ export class CustomerBookingsService {
       adults: b.adults, children: b.children, total_price: total, discount_amount: Number(b.discount_amount),
       paid_amount: paid, remaining_amount: Math.max(0, total - paid), payment_status,
       hold_expires_at: b.hold_expires_at, created_at: b.created_at,
-      can_resume: (b.booking_status === 'expired' || (['draft', 'pending_payment'].includes(b.booking_status) && !!b.hold_expires_at && b.hold_expires_at <= new Date())) && b.booked_start_time > new Date() && !!b.checkout_data?.booker && paid === 0,
+      can_resume: (b.booking_status === 'expired' || (['draft', 'pending_payment'].includes(b.booking_status) && !!b.hold_expires_at && b.hold_expires_at <= new Date())) && isStayBookableNow(b.booked_start_time, b.booked_end_time) && !!b.checkout_data?.booker && paid === 0,
       can_continue: ['draft', 'pending_payment'].includes(b.booking_status) && !!b.hold_expires_at && b.hold_expires_at > new Date(),
-      rooms: b.booking_rooms?.length ? b.booking_rooms.map(r => ({ room_type_name: r.room_type?.name, room_number: r.room?.room_number || null }))
-        : b.room ? [{ room_type_name: b.room.room_type?.name, room_number: b.room.room_number }] : [],
+      rooms: b.booking_rooms?.length ? b.booking_rooms.map(r => ({ room_type_name: r.room_type?.name, room_number: ['confirmed','checked_in','checked_out'].includes(b.booking_status) && paid >= total ? r.room?.room_number || null : null }))
+        : b.room ? [{ room_type_name: b.room.room_type?.name, room_number: ['confirmed','checked_in','checked_out'].includes(b.booking_status) && paid >= total ? b.room.room_number : null }] : [],
     };
   }
   private ensureCheckoutOpen(booking: Booking) {
@@ -87,28 +89,22 @@ export class CustomerBookingsService {
       const now = new Date();
       if (['draft', 'pending_payment'].includes(booking.booking_status) && booking.hold_expires_at > now) return;
       if (!['expired', 'draft', 'pending_payment'].includes(booking.booking_status)) throw new ConflictException('Trạng thái đơn không cho phép tiếp tục đặt phòng.');
-      if (booking.booked_start_time <= now) throw new ConflictException('Đã qua giờ nhận phòng của đơn. Vui lòng chọn ngày ở mới.');
-      if (Number(booking.discount_amount) !== 0 || await manager.getRepository(Payment).countBy({ booking_id: id }) || await manager.getRepository(Transaction).countBy({ booking_id: id }) || await manager.getRepository(Refund).countBy({ booking_id: id })) throw new ConflictException('Đơn có ưu đãi hoặc giao dịch cần lễ tân kiểm tra trước khi tiếp tục.');
+      if (!isStayBookableNow(booking.booked_start_time, booking.booked_end_time, now)) throw new ConflictException('Ngày ở đã qua hoặc đã hết giờ trả phòng. Vui lòng chọn ngày ở mới.');
+      if (Number(booking.discount_amount) !== 0 || await manager.getRepository(Payment).createQueryBuilder('p').where('p.booking_id = :id', { id }).andWhere("(p.payment_status != 'failed' OR p.provider_data IS NULL)").getCount() || await manager.getRepository(Transaction).countBy({ booking_id: id }) || await manager.getRepository(Refund).countBy({ booking_id: id })) throw new ConflictException('Đơn có ưu đãi hoặc giao dịch cần lễ tân kiểm tra trước khi tiếp tục.');
       const date = (d: Date) => d.toLocaleDateString('sv-SE', { timeZone: 'Asia/Bangkok' });
       const window = computeStayWindow(date(booking.booked_start_time), date(booking.booked_end_time), booking.stay_type || 'fullday');
-      let total = 0;
-      for (const type of types) {
-        const capacity = await manager.getRepository(Room).count({ where: { room_type_id: type.id, status: 'available', is_hidden: false } });
-        const occupied = await manager.getRepository(BookingRoom).createQueryBuilder('br').innerJoin('br.booking', 'b')
-          .where('br.room_types_id = :type AND b.id != :id', { type: type.id, id })
-          .andWhere('b.booked_start_time < :end AND b.booked_end_time > :start', { start: booking.booked_start_time, end: booking.booked_end_time })
-          .andWhere("(b.booking_status IN ('confirmed', 'checked_in') OR (b.booking_status IN ('draft', 'pending_payment') AND b.hold_expires_at > :now))", { now }).getCount();
-        const legacy = await manager.getRepository(Booking).createQueryBuilder('b').innerJoin('b.room', 'r')
-          .where('r.room_type_id = :type AND b.id != :id', { type: type.id, id })
-          .andWhere('b.booked_start_time < :end AND b.booked_end_time > :start', { start: booking.booked_start_time, end: booking.booked_end_time })
-          .andWhere("(b.booking_status IN ('confirmed', 'checked_in') OR (b.booking_status IN ('draft', 'pending_payment') AND (b.hold_expires_at IS NULL OR b.hold_expires_at > :now)))", { now })
-          .andWhere('NOT EXISTS (SELECT 1 FROM Booking_rooms x WHERE x.bookings_id = b.id)').getCount();
-        if (capacity - occupied - legacy < quantities.get(type.id)) throw new ConflictException('Phòng đã có khách khác giữ chỗ. Vui lòng chọn phòng hoặc ngày ở khác.');
-        const unit = Number(type.base_price) * window.nightsOrDays * window.priceFactor;
-        total += unit * quantities.get(type.id);
-        await manager.getRepository(BookingRoom).update({ bookings_id: id, room_types_id: type.id }, { unit_price: unit });
+      const available=await this.inventory.available(types.map(t=>t.id),booking.booked_start_time,booking.booked_end_time,manager,id);
+      const used=new Set<number>();const bedCounts={...(booking.checkout_data?.extras?.extra_beds_by_type||{})};let total=0,bedTotal=0;
+      for(const line of original.booking_rooms){
+        const unit=available.find(u=>u.type.id===line.room_types_id&&!used.has(u.room.id)&&(!line.room_id||u.room.id===line.room_id));
+        if(!unit)throw new ConflictException('Phòng đã có khách khác giữ chỗ hoặc đang bảo trì. Vui lòng chọn phòng hoặc ngày ở khác.');
+        used.add(unit.room.id);const extraBed=line.pricing_snapshot?!!line.pricing_snapshot.extra_bed:Number(bedCounts[line.room_types_id]||0)>0;
+        if(!line.pricing_snapshot&&extraBed)bedCounts[line.room_types_id]--;
+        const snapshot=this.inventory.snapshot(unit,window.nightsOrDays,window.priceFactor,extraBed);
+        await manager.getRepository(BookingRoom).update(line.id,{room_id:unit.room.id,unit_price:snapshot.room_total,pricing_snapshot:snapshot as any});total+=snapshot.room_total+snapshot.extra_bed_total;bedTotal+=snapshot.extra_bed_total;
       }
-      booking.total_price = Math.round(total);
+      if(booking.checkout_data?.extras)booking.checkout_data.extras.extra_bed_total=bedTotal;
+      booking.total_price=Math.round(total);
       booking.hold_expires_at = new Date(Math.floor((Date.now() + 15 * 60000) / 1000) * 1000);
       const guests = booking.checkout_data?.guests || [];
       const completedGuests = await manager.getRepository(BookingGuest).countBy({ bookings_id: id });
@@ -123,23 +119,31 @@ export class CustomerBookingsService {
     if (!booking) throw new NotFoundException('Không tìm thấy booking.');
     this.ensureCheckoutOpen(booking);
     const date = (d: Date) => d.toLocaleDateString('sv-SE', { timeZone: 'Asia/Bangkok' });
-    const selections = new Map<number, any>();
-    for (const room of booking.booking_rooms) {
-      const old = selections.get(room.room_types_id);
-      if (old) old.count++;
-      else selections.set(room.room_types_id, { room_type_id: room.room_types_id, room_type_name: room.room_type?.name || 'Loại phòng', room_type_image: '', count: 1, price: Number(room.unit_price), max_occupancy: room.room_type?.max_occupancy || 1 });
+    const stayNights = computeStayWindow(date(booking.booked_start_time), date(booking.booked_end_time), booking.stay_type || 'fullday').nightsOrDays;
+    const selections = new Map<string,any>();
+    for(const line of booking.booking_rooms){
+      const snapshot=line.pricing_snapshot;
+      const key=snapshot?`room:${line.room_id}`:`type:${line.room_types_id}`;
+      const old=selections.get(key);if(old){old.count++;continue;}
+      selections.set(key,{room_type_id:line.room_types_id,room_ids:line.room_id?[line.room_id]:undefined,room_type_name:line.room_type?.name||'Loại phòng',room_number:null,room_type_image:'',count:1,price:Number(line.unit_price)/stayNights,base_price_per_night:snapshot?.base_nightly_price??Number(line.unit_price)/stayNights,feature_price_per_night:snapshot?.feature_price_per_night||0,features:snapshot?.features||[],max_occupancy:line.room_type?.max_occupancy||1,has_extra_bed:snapshot?!!snapshot.extra_bed:Number(booking.checkout_data?.extras?.extra_beds_by_type?.[line.room_types_id]||0)>0,extra_beds:snapshot?(snapshot.extra_bed?1:0):Number(booking.checkout_data?.extras?.extra_beds_by_type?.[line.room_types_id]||0)});
     }
-    const types = [...selections.values()];
+    const types=[...selections.values()];
     const saved = booking.checkout_data || {};
     const guests = saved.guests?.length ? saved.guests : Array.from({ length: booking.adults + booking.children }, (_, i) => ({ id: `slot-${i + 1}`, slot_index: i + 1, guest_type: i < booking.adults ? 'adult' : 'child', full_name: '', date_of_birth: '', is_booker: i === 0 && saved.booker?.is_staying !== false, is_foreigner: false, id_type: 'cccd', id_number: '', slot_status: 'empty', retry_count: 0 }));
+    const payments = await this.db.getRepository(Payment).findBy({ booking_id: id });
+    const transactions = await this.db.getRepository(Transaction).findBy({ booking_id: id });
+    const refunds = await this.db.getRepository(Refund).findBy({ booking_id: id });
+    const paid = customerNetPaid(payments, transactions, refunds);
     return {
+      paid_amount: paid, remaining_amount: Math.max(0, Number(booking.total_price) - paid),
       id: String(id), server_booking_id: id, booking_code: booking.booking_code,
       apartment_id: booking.apartment_id, apartment_name: booking.apartment?.name || '', apartment_address: booking.apartment?.address || '',
       room_type_id: types[0]?.room_type_id, room_type_name: types[0]?.room_type_name || '', room_type_image: '', booking_rooms: types,
       num_rooms: booking.booking_rooms.length, check_in_date: date(booking.booked_start_time), check_out_date: date(booking.booked_end_time),
-      stay_type: booking.stay_type || 'fullday', nights: Math.max(1, Math.round((booking.booked_end_time.getTime() - booking.booked_start_time.getTime()) / 86400000)),
+      stay_type: booking.stay_type || 'fullday', nights: stayNights,
       num_adults: booking.adults, num_children: booking.children, children_ages: [], price_breakdown: [],
-      room_subtotal: Number(booking.total_price), extra_fee_total: 0, service_total: 0, discount_amount: Number(booking.discount_amount), total_price: Number(booking.total_price),
+      extra_bed_fee: Number(saved.extras?.extra_bed_total || 0), has_extra_bed: Number(saved.extras?.extra_bed_total || 0) > 0,
+      room_subtotal: Number(booking.total_price) - Number(saved.extras?.extra_bed_total || 0), extra_fee_total: Number(saved.extras?.extra_bed_total || 0), service_total: 0, discount_amount: Number(booking.discount_amount), total_price: Number(booking.total_price),
       hold_expires_at: booking.hold_expires_at.getTime(), status: booking.booking_status === 'draft' ? 'pending_info' : 'pending_payment',
       resume_stage: booking.booking_status === 'draft' ? 'guests' : 'payment',
       booker: { ...saved.booker, full_name: saved.booker?.full_name || booking.customer.full_name, email: booking.customer.email, phone: saved.booker?.phone || booking.customer.phone || '', is_staying: saved.booker?.is_staying !== false, email_verified: true, consent_data_protection: true },
@@ -198,15 +202,21 @@ export class CustomerBookingsService {
   }
 
   async createGuestBooking(data: GuestBookingDto, draft = false) {
-    const selected = data.selected_rooms || (data.room_type_id ? [{ room_type_id: data.room_type_id, quantity: data.num_rooms || 1 }] : []);
+    const selected = data.selected_rooms || (data.room_type_id ? [{ room_type_id: data.room_type_id, quantity: data.num_rooms || 1, extra_beds: 0, room_ids: undefined }] : []);
     const quantities = new Map<number, number>();
-    for (const item of selected) quantities.set(item.room_type_id, (quantities.get(item.room_type_id) || 0) + item.quantity);
+    const extraBeds = new Map<number, number>();
+    for (const item of selected) {
+      if ((item.extra_beds || 0) > item.quantity) throw new BadRequestException('Mỗi phòng chỉ được chọn tối đa một nệm phụ.');
+      quantities.set(item.room_type_id, (quantities.get(item.room_type_id) || 0) + item.quantity);
+      extraBeds.set(item.room_type_id, (extraBeds.get(item.room_type_id) || 0) + (item.extra_beds || 0));
+    }
+    const extraBedCount = [...extraBeds.values()].reduce((sum, count) => sum + count, 0);
     const roomCount = [...quantities.values()].reduce((a, b) => a + b, 0);
     if (!roomCount || roomCount > 10 || roomCount > data.adults) throw new BadRequestException('Chọn từ 1 đến 10 phòng, mỗi phòng có ít nhất một người lớn.');
     const stayType = data.stay_type || 'fullday';
     const window = computeStayWindow(data.check_in_date, data.check_out_date, stayType);
     const start = new Date(`${window.startAt}+07:00`), end = new Date(`${window.endAt}+07:00`);
-    if (!Number.isFinite(start.getTime()) || !Number.isFinite(end.getTime()) || start <= new Date() || end <= start || window.nightsOrDays > 90 ||
+    if (!isStayBookableNow(start, end) || window.nightsOrDays > 90 ||
       start.toLocaleDateString('sv-SE', { timeZone: 'Asia/Bangkok' }) !== data.check_in_date ||
       (stayType !== 'daytime' && (data.check_out_date <= data.check_in_date || end.toLocaleDateString('sv-SE', { timeZone: 'Asia/Bangkok' }) !== data.check_out_date))) throw new BadRequestException('Ngày nhận/trả phòng không hợp lệ hoặc đã qua.');
     return this.db.transaction(async manager => {
@@ -217,21 +227,21 @@ export class CustomerBookingsService {
         types.push(type);
       }
       if (new Set(types.map(t => t.apartment_id)).size !== 1) throw new BadRequestException('Các phòng phải thuộc cùng một chi nhánh.');
-      if (types.reduce((sum, t) => sum + t.max_occupancy * quantities.get(t.id), 0) < data.adults) throw new BadRequestException('Số khách vượt sức chứa phòng.');
-      let total = 0;
-      for (const type of types) {
-        const capacity = await manager.getRepository(Room).count({ where: { room_type_id: type.id, status: 'available', is_hidden: false } });
-        const occupied = await manager.getRepository(BookingRoom).createQueryBuilder('br').innerJoin('br.booking', 'b')
-          .where('br.room_types_id = :type', { type: type.id })
-          .andWhere('b.booked_start_time < :end AND b.booked_end_time > :start', { start, end })
-          .andWhere("(b.booking_status IN ('confirmed', 'checked_in') OR (b.booking_status IN ('draft', 'pending_payment') AND b.hold_expires_at > :now))", { now: new Date() }).getCount();
-        const legacy = await manager.getRepository(Booking).createQueryBuilder('b').innerJoin('b.room', 'r')
-          .where('r.room_type_id = :type', { type: type.id }).andWhere('b.booked_start_time < :end AND b.booked_end_time > :start', { start, end })
-          .andWhere("(b.booking_status IN ('confirmed', 'checked_in') OR (b.booking_status IN ('draft', 'pending_payment') AND (b.hold_expires_at IS NULL OR b.hold_expires_at > :now)))", { now: new Date() })
-          .andWhere('NOT EXISTS (SELECT 1 FROM Booking_rooms x WHERE x.bookings_id = b.id)').getCount();
-        if (capacity - occupied - legacy < quantities.get(type.id)) throw new BadRequestException('Không còn đủ phòng cho thời gian đã chọn.');
-        total += Number(type.base_price) * quantities.get(type.id) * window.nightsOrDays * window.priceFactor;
+      if (types.reduce((sum, t) => sum + t.max_occupancy * quantities.get(t.id), extraBedCount) < data.adults) throw new BadRequestException('Số khách vượt sức chứa phòng.');
+      const available=await this.inventory.available(types.map(t=>t.id),start,end,manager);
+      const used=new Set<number>();const quoted:any[]=[];
+      for(const selection of selected){
+        const requested=selection.room_ids;
+        if(requested && (!Array.isArray(requested)||requested.length!==selection.quantity||new Set(requested).size!==requested.length))throw new BadRequestException('Danh sách phòng cụ thể không khớp số lượng.');
+        const candidates=available.filter(u=>u.type.id===selection.room_type_id&&!used.has(u.room.id)&&(!requested||requested.includes(u.room.id)));
+        if(candidates.length<selection.quantity)throw new BadRequestException('Không còn đủ phòng cho thời gian đã chọn. Phòng có đặc điểm này có thể đã được giữ hoặc đang bảo trì.');
+        for(const [index,unit]of candidates.slice(0,selection.quantity).entries()){
+          used.add(unit.room.id);quoted.push({unit,snapshot:this.inventory.snapshot(unit,window.nightsOrDays,window.priceFactor,index<(selection.extra_beds||0))});
+        }
       }
+      let total=quoted.reduce((sum,q)=>sum+q.snapshot.room_total,0);
+      const extraBedTotal = extraBedCount * 150000 * window.nightsOrDays;
+      total += extraBedTotal;
       const customer = await manager.getRepository(Customer).findOneBy({ email: data.email.trim().toLowerCase(), is_blocked: false, is_hidden: false });
       if (!customer) throw new BadRequestException('Vui lòng xác thực email người đặt trước.');
       if (!customer.account_created_at) await manager.getRepository(Customer).update(customer.id, { full_name: data.full_name, phone: data.phone || customer.phone });
@@ -240,10 +250,14 @@ export class CustomerBookingsService {
         apartment_id: types[0].apartment_id, booking_type: (stayType === 'daytime' ? 'daily' : stayType === 'fullday' ? 'extended' : 'overnight') as BookingType,
         stay_type: stayType, start_at: start, end_at: end, booked_start_time: start, booked_end_time: end,
         adults: data.adults, children: data.children, booking_status: draft ? BookingStatus.DRAFT : BookingStatus.PENDING_PAYMENT,
-        checkout_data: { booker: { full_name: data.full_name, email: data.email.trim().toLowerCase(), phone: data.phone || '', is_staying: data.is_staying !== false, consent_data_protection: true } },
+        checkout_data: { extras: { extra_beds_by_type: Object.fromEntries(extraBeds), extra_bed_nightly_rate: 150000, extra_bed_total: extraBedTotal }, booker: { full_name: data.full_name, email: data.email.trim().toLowerCase(), phone: data.phone || '', is_staying: data.is_staying !== false, consent_data_protection: true } },
         total_price: Math.round(total), hold_expires_at: new Date(Math.floor((Date.now() + 15 * 60000) / 1000) * 1000),
       });
-      for (const type of types) await manager.getRepository(BookingRoom).save(Array.from({ length: quantities.get(type.id) }, () => ({ bookings_id: booking.id, room_types_id: type.id, unit_price: Number(type.base_price) * window.priceFactor * window.nightsOrDays })));
+      let adultsLeft=data.adults;
+      for(const [index,q]of quoted.entries()){
+        const adults=Math.min(q.unit.type.max_occupancy+(q.snapshot.extra_bed?1:0),adultsLeft-(quoted.length-index-1));adultsLeft-=adults;
+        await manager.getRepository(BookingRoom).save({bookings_id:booking.id,room_types_id:q.unit.type.id,room_id:q.unit.room.id,unit_price:q.snapshot.room_total,pricing_snapshot:q.snapshot,adults,children:index===0?data.children:0});
+      }
       return { booking_id: booking.id, booking_code: booking.booking_code, booking_status: booking.booking_status, total_price: Number(booking.total_price), hold_expires_at: booking.hold_expires_at };
     });
   }

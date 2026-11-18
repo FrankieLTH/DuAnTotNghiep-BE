@@ -15,7 +15,15 @@ export interface SearchCriteria {
 }
 
 export interface AvailableRoomType {
+  variantKey?: string;
+  parentId?: number;
+  variantGroup?: string;
+  variantLabel?: string;
+  roomIds?: number[];
+  featurePricePerNight?: number;
+  features?: {id:number;name:string;extra_price_per_night:number}[];
   roomTypeId: number;
+  roomId?: number;
   apartmentId: number;
   apartmentName?: string;
   name: string;
@@ -28,6 +36,9 @@ export interface AvailableRoomType {
 }
 
 export interface RoomPlanItem {
+  roomIds?: number[];
+  features?: {id:number;name:string;extra_price_per_night:number}[];
+  featurePricePerNight?: number;
   roomTypeId: number;
   name?: string;
   quantity: number;
@@ -248,7 +259,7 @@ export function buildPlans(
     for (const rt of validTypes) {
       if (rt.maxOccupancy >= adults) {
         const guestAllocation = distributeGuests(adults, criteria.children, 1);
-        const totalPrice = Math.round(rt.basePrice * factor * nights);
+        const totalPrice = (Math.round(rt.basePrice * factor) + (rt.featurePricePerNight || 0)) * nights;
         const bedText = (rt.bedConfig || '').toLowerCase();
         const prefersDouble = criteria.children > 0 || adults % 2 === 0;
         const isDouble = bedText.includes('đôi') || bedText.includes('queen') || bedText.includes('king') || bedText.includes('double');
@@ -258,6 +269,9 @@ export function buildPlans(
           items: [
             {
               roomTypeId: rt.roomTypeId,
+              roomIds: rt.roomIds?.slice(0, 1),
+              features: rt.features,
+              featurePricePerNight: rt.featurePricePerNight,
               name: rt.name,
               quantity: 1,
               basePrice: rt.basePrice,
@@ -316,7 +330,7 @@ export function buildPlans(
         const itemSlots = allGuestSlots.slice(slotIdx, slotIdx + item.qty);
         slotIdx += item.qty;
 
-        totalPrice += Math.round(item.type.basePrice * factor * nights * item.qty);
+        totalPrice += (Math.round(item.type.basePrice * factor) + (item.type.featurePricePerNight || 0)) * nights * item.qty;
         totalArea += (item.type.area || 28) * item.qty;
         totalRoomsCount += item.qty;
 
@@ -329,6 +343,9 @@ export function buildPlans(
 
         planItems.push({
           roomTypeId: item.type.roomTypeId,
+          roomIds: item.type.roomIds?.slice(0, item.qty),
+          features: item.type.features,
+          featurePricePerNight: item.type.featurePricePerNight,
           name: item.type.name,
           quantity: item.qty,
           basePrice: item.type.basePrice,
@@ -727,4 +744,3 @@ export async function recommendWithFallback(
 
   return [];
 }
-

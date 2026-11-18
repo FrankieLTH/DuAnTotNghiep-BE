@@ -2,103 +2,37 @@ import React, { useState } from 'react';
 import { Button, Input } from '../AdminUI';
 import { IconLock } from '../AdminIcons';
 import { AdminUser } from '../AdminLayout';
+import api from '../../../services/api';
 
 interface LoginScreenProps {
-  onLoginSuccess: (user: AdminUser) => void;
+  onLoginSuccess: (user: AdminUser, token: string) => void;
   onGoHome: () => void;
 }
 
 export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess, onGoHome }) => {
-  const [email, setEmail] = useState<string>('admin@homestay.com');
-  const [password, setPassword] = useState<string>('admin123');
+  const [email, setEmail] = useState<string>('');
+  const [password, setPassword] = useState<string>('');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(false);
 
-  // Pre-configured accounts for validation
-  const validAccounts: (AdminUser & { password: string; isBlocked?: boolean })[] = [
-    {
-      id: 1,
-      name: 'Võ Minh Quân (Admin)',
-      email: 'admin@homestay.com',
-      password: 'admin123',
-      role: 'admin',
-      branchName: 'Tất cả chi nhánh',
-    },
-    {
-      id: 2,
-      name: 'Nguyễn Thị Hương Giang',
-      email: 'quanly.cn1@homestay.com',
-      password: 'manager123',
-      role: 'manager',
-      branchId: 1,
-      branchName: 'CN1: Triền Núi Nhỏ',
-    },
-    {
-      id: 3,
-      name: 'Trần Văn Bảo',
-      email: 'quanly.cn2@homestay.com',
-      password: 'manager123',
-      role: 'manager',
-      branchId: 2,
-      branchName: 'CN2: Bãi Trước / Núi Lớn',
-    },
-    {
-      id: 4,
-      name: 'Đặng Tuấn Kiệt',
-      email: 'letan.cn1@homestay.com',
-      password: 'pass123',
-      role: 'manager',
-      branchId: 1,
-      branchName: 'CN1: Triền Núi Nhỏ',
-      isBlocked: true, // Blocked test
-    },
-  ];
-
-  const handleLogin = (e?: React.FormEvent) => {
+  const handleLogin = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     setErrorMessage(null);
     setIsLoading(true);
-
-    setTimeout(() => {
-      const match = validAccounts.find(
-        (a) => a.email.toLowerCase().trim() === email.toLowerCase().trim()
+    try {
+      const response = await api.post('/auth/admin/login', { email, password });
+      const { access_token: token, user } = response.data;
+      if (!token || !user || !['admin', 'manager'].includes(user.role)) {
+        throw new Error('Tài khoản không có quyền truy cập quản trị.');
+      }
+      onLoginSuccess(user, token);
+    } catch (error: any) {
+      setErrorMessage(
+        error?.response?.data?.message || error?.message || 'Không thể đăng nhập. Vui lòng thử lại.'
       );
-
-      if (!match) {
-        setErrorMessage('Tài khoản email không tồn tại trong hệ thống quản trị.');
-        setIsLoading(false);
-        return;
-      }
-
-      if (match.isBlocked) {
-        setErrorMessage('Tài khoản này hiện đang bị KHÓA bởi Quản trị viên cấp cao.');
-        setIsLoading(false);
-        return;
-      }
-
-      if (match.password !== password) {
-        setErrorMessage('Mật khẩu không chính xác. Vui lòng kiểm tra lại.');
-        setIsLoading(false);
-        return;
-      }
-
-      // Success
+    } finally {
       setIsLoading(false);
-      onLoginSuccess({
-        id: match.id,
-        name: match.name,
-        email: match.email,
-        role: match.role,
-        branchId: match.branchId,
-        branchName: match.branchName,
-      });
-    }, 400);
-  };
-
-  const handleQuickSelect = (acc: (typeof validAccounts)[0]) => {
-    setEmail(acc.email);
-    setPassword(acc.password);
-    setErrorMessage(null);
+    }
   };
 
   return (
@@ -155,44 +89,9 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess, onGoHo
           </Button>
         </form>
 
-        {/* 1-Click Fast Switch Demo Accounts */}
-        <div className="pt-4 border-t border-[#E5E0D8] space-y-2.5">
-          <div className="text-[11px] font-semibold text-[#78716C] uppercase tracking-wider text-center">
-            Chọn nhanh tài khoản thử nghiệm
-          </div>
-          <div className="space-y-1.5 text-xs">
-            {validAccounts.map((acc) => (
-              <button
-                key={acc.id}
-                type="button"
-                onClick={() => handleQuickSelect(acc)}
-                className={`w-full p-2 text-left rounded-[4px] border transition-colors flex items-center justify-between cursor-pointer ${
-                  email === acc.email
-                    ? 'border-[#B4532A] bg-[#FAF0EB]'
-                    : 'border-[#E5E0D8] hover:bg-[#F9F8F6]'
-                }`}
-              >
-                <div>
-                  <div className="font-semibold text-[#1C1917]">{acc.name}</div>
-                  <div className="text-[11px] text-[#78716C]">
-                    {acc.email} • {acc.branchName || 'Tất cả CN'}
-                  </div>
-                </div>
-                <span
-                  className={`text-[10px] font-bold uppercase px-1.5 py-0.5 rounded ${
-                    acc.isBlocked
-                      ? 'bg-[#FDF2F2] text-[#DC2626]'
-                      : acc.role === 'admin'
-                      ? 'bg-[#FAF0EB] text-[#B4532A]'
-                      : 'bg-[#EDF5F1] text-[#2A694E]'
-                  }`}
-                >
-                  {acc.isBlocked ? 'Bị khóa' : acc.role.toUpperCase()}
-                </span>
-              </button>
-            ))}
-          </div>
-        </div>
+        <p className="pt-4 border-t border-[#E5E0D8] text-xs text-center text-[#78716C]">
+          Đăng nhập bằng tài khoản nhân viên đã được cấp trong hệ thống.
+        </p>
 
         {/* Back to Home Button */}
         <div className="text-center pt-2">

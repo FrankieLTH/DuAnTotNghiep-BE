@@ -1,0 +1,11 @@
+const assert = require('node:assert/strict');
+const { isStayBookableNow } = require('../dist/backend/src/modules/customer/customer-stay-window');
+const start = new Date('2026-11-14T14:00:00+07:00'), end = new Date('2026-11-16T12:00:00+07:00');
+for (const time of ['2026-11-14T00:01:00+07:00', '2026-11-14T13:59:00+07:00', '2026-11-14T14:00:00+07:00', '2026-11-14T15:39:00+07:00', '2026-11-14T23:59:59+07:00']) assert.equal(isStayBookableNow(start,end,new Date(time)),true,time);
+assert.equal(isStayBookableNow(start,end,new Date('2026-11-15T00:00:00+07:00')),false,'A new reservation cannot start yesterday');
+assert.equal(isStayBookableNow(start,end,new Date('2026-11-16T12:00:00+07:00')),false,'Checkout has passed');
+assert.equal(isStayBookableNow(new Date('2026-11-14T08:00:00+07:00'),new Date('2026-11-14T18:00:00+07:00'),new Date('2026-11-14T15:39:00+07:00')),true,'Daytime can be booked while the stay is still open');
+assert.equal(isStayBookableNow(new Date('2026-11-14T08:00:00+07:00'),new Date('2026-11-14T18:00:00+07:00'),new Date('2026-11-14T18:00:00+07:00')),false,'Closed daytime stay cannot be booked');
+assert.equal(isStayBookableNow(new Date('invalid'),end,start),false);
+assert.equal(isStayBookableNow(end,start,start),false);
+console.log('PASS: 11 same-day arrival checks, local-midnight cutoff, checkout cutoff and invalid dates.');

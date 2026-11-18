@@ -3,7 +3,7 @@ import axios from 'axios';
 import { clearCustomerToken, getCustomerToken, saveCustomerToken } from './customerSession';
 export type CustomerScope = 'account' | 'lookup';
 export type OtpPurpose = 'lookup' | 'booking';
-export interface CustomerProfile { id: number; full_name: string; email: string; phone?: string; account_created_at?: string; email_verified_at?: string }
+export interface CustomerProfile { id: number; full_name: string; email: string; phone?: string; account_created_at?: string; email_verified_at?: string; wallet_balance?: number; wallet_available?: number }
 export type CustomerRequestType = 'cancel' | 'refund' | 'extend' | 'change_room';
 export interface CustomerRequest {
   id: number; booking_id: number; type: CustomerRequestType; status: 'pending' | 'reviewing' | 'approved' | 'resolved' | 'rejected' | 'processed';
@@ -89,12 +89,12 @@ export const customerService = {
   pins: (id: number, scope: CustomerScope = 'account') => forScope(scope).get(`/bookings/${id}/pins`).then(r => r.data as CustomerPin[]),
   list: (status: string, page: number, scope: CustomerScope = 'account') => forScope(scope).get('/bookings', { params: { status: status || undefined, page } }).then(r => r.data as { items: CustomerBooking[]; total: number; page_size: number }),
   detail: (id: number, scope: CustomerScope = 'account') => forScope(scope).get(`/bookings/${id}`).then(r => r.data as CustomerBooking),
-  startDraft: (data: { email: string; full_name: string; phone: string; is_staying: boolean; selected_rooms: { room_type_id: number; quantity: number }[]; stay_type: string; adults: number; children: number; check_in_date: string; check_out_date: string }, scope: CustomerScope) => forScope(scope).post('/booking-drafts', data).then(r => r.data),
+  startDraft: (data: { email: string; full_name: string; phone: string; is_staying: boolean; selected_rooms: { room_type_id: number; quantity: number; extra_beds?: number; room_ids?: number[] }[]; stay_type: string; adults: number; children: number; check_in_date: string; check_out_date: string }, scope: CustomerScope) => forScope(scope).post('/booking-drafts', data).then(r => r.data),
   checkout: (id: number, scope: CustomerScope) => forScope(scope).get(`/bookings/${id}/checkout`).then(r => ({ ...r.data, customer_scope: scope }) as BookingDraft),
   updateBooker: (id: number, data: { full_name: string; phone: string; is_staying: boolean }, scope: CustomerScope) => forScope(scope).put(`/bookings/${id}/checkout/booker`, data).then(r => r.data),
   saveGuestDraft: (id: number, guests: { full_name: string; date_of_birth: string; guest_type: string; is_booker: boolean; is_foreigner: boolean; id_type: string; id_number: string; slot_status: string }[], scope: CustomerScope) => forScope(scope).put(`/bookings/${id}/checkout/guest-draft`, { guests }).then(r => r.data),
   completeCheckout: (id: number, guests: { full_name: string; date_of_birth: string; guest_type: string; is_booker: boolean; is_foreigner: boolean; id_type: string; id_number: string }[], scope: CustomerScope) => forScope(scope).put(`/bookings/${id}/checkout`, { guests }).then(r => r.data),
-  createGuestBooking: (data: { selected_rooms?: { room_type_id: number; quantity: number }[]; stay_type?: string; email: string; full_name: string; phone: string; room_type_id: number; num_rooms: number; adults: number; children: number; check_in_date: string; check_out_date: string }, scope: CustomerScope = 'lookup') => forScope(scope).post('/guest-bookings', data).then(r => r.data),
+  createGuestBooking: (data: { selected_rooms?: { room_type_id: number; quantity: number; extra_beds?: number; room_ids?: number[] }[]; stay_type?: string; email: string; full_name: string; phone: string; room_type_id: number; num_rooms: number; adults: number; children: number; check_in_date: string; check_out_date: string }, scope: CustomerScope = 'lookup') => forScope(scope).post('/guest-bookings', data).then(r => r.data),
 };
 export function customerError(error: unknown) {
   if (axios.isAxiosError(error)) {

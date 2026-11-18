@@ -1,3 +1,4 @@
+import { paymentService } from '../services/paymentService';
 import React, { useEffect, useState } from 'react';
 import { customerService, customerError, CustomerBooking, CustomerScope } from '../services/customerService';
 import { BookingDraft } from '../services/dataService';
@@ -14,7 +15,7 @@ export function BookingDetailPage({ id, scope, onBack, onBookRoom }: { id: numbe
   const [resuming, setResuming] = useState(false);
   const resume = async () => {
     setResuming(true); setError('');
-    try { const saved = await customerService.resume(id, scope); setDraft(saved); setNotice('Đã kiểm tra lại phòng và giữ chỗ trong 15 phút. Bạn có thể điền tiếp thông tin đã lưu; vui lòng kiểm tra tổng tiền theo giá hiện tại trước khi thanh toán.'); window.scrollTo({ top: 0, behavior: 'smooth' }); }
+    try { await paymentService.status(id, scope); const saved = await customerService.resume(id, scope); setDraft(saved); setNotice('Đã kiểm tra lại phòng và giữ chỗ trong 15 phút. Bạn có thể điền tiếp thông tin đã lưu; vui lòng kiểm tra tổng tiền theo giá hiện tại trước khi thanh toán.'); window.scrollTo({ top: 0, behavior: 'smooth' }); }
     catch (err) { setError(customerError(err)); } finally { setResuming(false); }
   };
   const [retry, setRetry] = useState(0);
@@ -23,6 +24,11 @@ export function BookingDetailPage({ id, scope, onBack, onBookRoom }: { id: numbe
     setLoading(true); setError(''); setBooking(null); setDraft(null);
     (async () => {
       try {
+        if (new URLSearchParams(window.location.search).has('payment_return')) {
+          const result = await paymentService.status(id, scope);
+          const paid = result.payments.find(p => p.status === 'paid' || p.review_required);
+          if (active) setNotice(paid ? (paid.review_required ? 'Đã ghi nhận khoản thu cần homestay kiểm tra. Vui lòng xem số tiền đã nhận trong đơn và liên hệ hỗ trợ trước khi chuyển thêm.' : 'Thanh toán thành công. Đơn đặt phòng đã được xác nhận.') : 'Chưa ghi nhận thanh toán hoàn tất. Nếu đã chuyển tiền, bấm Kiểm tra thanh toán để cập nhật; không chuyển lại khi chưa kiểm tra.');
+        }
         const detail = await customerService.detail(id, scope);
         if (!active) return;
         setBooking(detail);
@@ -43,9 +49,10 @@ export function BookingDetailPage({ id, scope, onBack, onBookRoom }: { id: numbe
         {booking && <p className="ca-muted">{booking.apartment_name} · {booking.rooms.map(r => r.room_type_name).filter(Boolean).join(' · ')}</p>}
       </div></header>
       {notice && <p className="ca-notice" role="status">{notice}</p>}
+      <button className="ca-link" disabled={loading} onClick={() => { window.history.replaceState({ customerScope: scope }, '', `/tra-cuu/don/${id}?payment_return=1`); setRetry(n => n + 1); }}>Kiểm tra thanh toán</button>
       {loading && <p role="status">Đang tải thông tin đã lưu của đơn…</p>}
       {error && <div className="ca-alert" role="alert">{error} <button className="ca-link" onClick={() => setRetry(n => n + 1)}>Thử lại</button></div>}
-      {draft && <section className="ca-panel ca-checkout-progress" aria-label="Thông tin cần hoàn tất">
+      {draft && draft.resume_stage !== 'payment' && <section className="ca-panel ca-checkout-progress" aria-label="Thông tin cần hoàn tất">
         <h2>Thông tin cần hoàn tất</h2>
         <div className="ca-progress-grid">
           <div><h3>1. Người đặt phòng</h3><p>{draft.booker.full_name} · {draft.booker.phone}</p><p className="ca-muted">{draft.booker.email}</p><small>Thông tin đã lưu. Có thể quay lại bước Người đặt để chỉnh sửa.</small></div>

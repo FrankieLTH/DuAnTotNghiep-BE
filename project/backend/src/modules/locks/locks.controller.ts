@@ -2,6 +2,10 @@ import { Controller, Post, Get, Body, Param, ParseIntPipe, Query, UseGuards, Req
 import { LocksService } from './locks.service';
 import { CustomerGuard } from '../customer/customer.guard';
 import { CustomerManagementService } from '../customer/customer-management.service';
+import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { PermissionsGuard } from '../../common/guards/permissions.guard';
+import { RequirePermissions } from '../../common/decorators/permissions.decorator';
+import { Permission } from '../../common/config/permissions.config';
 
 @Controller()
 export class LocksController {
@@ -28,6 +32,8 @@ export class LocksController {
     return this.locksService.earlyCheckOut(body.booking_id);
   }
 
+  @UseGuards(JwtAuthGuard, PermissionsGuard)
+  @RequirePermissions(Permission.LOCKS_MANAGE)
   @Post('admin/locks/remote-unlock')
   async remoteUnlock(@Body() body: { lock_id: number }) {
     return this.locksService.remoteUnlock(body.lock_id);

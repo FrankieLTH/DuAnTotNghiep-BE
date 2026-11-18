@@ -11,10 +11,15 @@ const api = axios.create({
   timeout: 10000,
 });
 
+export const adminAuthHeaders = (): Record<string, string> => {
+  const token = sessionStorage.getItem('homestay_admin_token');
+  return token ? { Authorization: `Bearer ${token}` } : {};
+};
+
 // Request Interceptor: Tự động gắn Token xác thực nếu có
 api.interceptors.request.use(
   (config) => {
-    const token = localStorage.getItem('token');
+    const token = sessionStorage.getItem('homestay_admin_token') || localStorage.getItem('token');
     if (token && config.headers) {
       config.headers.Authorization = `Bearer ${token}`;
     }

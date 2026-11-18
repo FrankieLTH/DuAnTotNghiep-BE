@@ -74,6 +74,12 @@ export class Customer {
   @Column({ type: 'datetime', nullable: true })
   email_verified_at: Date;
 
+  @Column('decimal', { precision: 12, scale: 2, default: 0 })
+  wallet_balance: number;
+
+  @Column('decimal', { precision: 12, scale: 2, default: 0 })
+  wallet_reserved: number;
+
   @Column({ default: false })
   is_blocked: boolean;
 

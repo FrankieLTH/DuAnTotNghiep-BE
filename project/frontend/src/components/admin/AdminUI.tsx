@@ -428,7 +428,7 @@ export const Modal: React.FC<ModalProps> = ({
   }[maxWidth];
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-stone-900/40 select-none">
+    <div role="dialog" aria-modal="true" aria-label={title} className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-stone-900/40 select-none">
       <div
         className={`w-full ${widthClass} bg-white border border-[#DDD7CE] rounded-[6px] shadow-lg overflow-hidden flex flex-col max-h-[90vh]`}
       >
@@ -436,6 +436,7 @@ export const Modal: React.FC<ModalProps> = ({
           <h3 className="text-base font-semibold text-[#1C1917]">{title}</h3>
           <button
             onClick={onClose}
+            aria-label="Đóng"
             className="text-[#78716C] hover:text-[#1C1917] p-1 rounded hover:bg-[#EBE7E0] transition-colors cursor-pointer"
           >
             <IconX className="w-4 h-4" />
@@ -562,7 +563,7 @@ export const Drawer: React.FC<DrawerProps> = ({
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex justify-end bg-stone-900/40">
+    <div role="dialog" aria-modal="true" aria-label={title} className="fixed inset-0 z-50 flex justify-end bg-stone-900/40">
       <div
         className={`w-full ${width} h-full bg-white border-l border-[#DDD7CE] shadow-2xl flex flex-col`}
       >
@@ -573,6 +574,7 @@ export const Drawer: React.FC<DrawerProps> = ({
           </div>
           <button
             onClick={onClose}
+            aria-label="Đóng"
             className="text-[#78716C] hover:text-[#1C1917] p-1.5 rounded hover:bg-[#EBE7E0] transition-colors cursor-pointer"
           >
             <IconX className="w-5 h-5" />

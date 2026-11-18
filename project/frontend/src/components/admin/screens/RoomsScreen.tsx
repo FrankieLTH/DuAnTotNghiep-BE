@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   TableContainer,
   TableHeader,
@@ -7,8 +7,6 @@ import {
   Button,
   Input,
   Drawer,
-  Modal,
-  ConfirmDialog,
   formatMoney,
 } from '../AdminUI';
 import {
@@ -27,12 +25,22 @@ import {
   IconRefresh,
 } from '../AdminIcons';
 import { AdminUser } from '../AdminLayout';
-import { adminApi, RoomTypeItem, RoomItem } from '../../../services/adminService';
 import {
-  generateFloorRoomsBatch,
-  findNextStartDigitsForPrefix,
-  sortRoomsNatural,
-} from '../../../../../shared/helpers/roomNumbering';
+  adminApi,
+  RoomTypeItem,
+  RoomItem,
+  RoomFeatureItem,
+} from '../../../services/adminService';
+import {
+  suggestFloor,
+  computeRoomDisplayStatus,
+  normalizeRoomNumber,
+} from '@shared/index';
+
+import { RoomBlockModal } from './rooms/RoomBlockModal';
+import { ManageGroupsFeaturesModal } from './rooms/ManageGroupsFeaturesModal';
+import {getAmenities,AmenityItem} from '../../../services/dataService';
+import api from '../../../services/api';
 
 interface RoomsScreenProps {
   currentUser: AdminUser;
@@ -40,54 +48,43 @@ interface RoomsScreenProps {
   onShowToast: (msg: string, type?: 'success' | 'error' | 'warning' | 'info') => void;
 }
 
-type RoomStatus = 'available' | 'occupied' | 'cleaning' | 'maintenance';
-
-const ROOM_STATUS_CONFIG: Record<RoomStatus, { label: string; badge: JSX.Element; nextLabel: string; nextStatus: RoomStatus | null; canManual: boolean; blockedReason?: string }> = {
-  available: {
-    label: 'Trống',
-    badge: <Badge variant="success" size="sm">🟢 Trống</Badge>,
-    nextLabel: 'Đang lưu trú',
-    nextStatus: 'occupied',
-    canManual: false,
-    blockedReason: 'Trạng thái này chỉ chuyển tự động khi có đơn check-in',
-  },
-  occupied: {
-    label: 'Đang lưu trú',
-    badge: <Badge variant="info" size="sm">🔵 Đang lưu trú</Badge>,
-    nextLabel: 'Cần dọn dẹp',
-    nextStatus: 'cleaning',
-    canManual: true,
-  },
-  cleaning: {
-    label: 'Cần dọn dẹp',
-    badge: <Badge variant="warning" size="sm">🟡 Cần dọn dẹp</Badge>,
-    nextLabel: 'Trống',
-    nextStatus: 'available',
-    canManual: true,
-  },
-  maintenance: {
-    label: 'Bảo trì',
-    badge: <Badge variant="danger" size="sm">🔴 Bảo trì</Badge>,
-    nextLabel: 'Trống',
-    nextStatus: 'available',
-    canManual: true,
-  },
-};
-
 const emptyRoomTypeForm = {
-  name: '', apartment_id: 0, base_price: 600000, max_occupancy: 2,
-  description: '', bed_config: '1 giường đôi', area: 30, is_active: true,
-};
-const emptyRoomForm: { apartment_id: number; room_type_id: number; room_number: string; status: RoomStatus; special_features?: string } = {
-  apartment_id: 0, room_type_id: 0, room_number: '', status: 'available', special_features: '',
+  name: '',
+  amenity_ids: [] as number[],
+  apartment_id: 0,
+  max_occupancy: 2,
+  description: '',
+  bed_config: '1 giường đôi',
+  image_urls: [] as string[],
+  is_active: true,
 };
 
-export const RoomsScreen: React.FC<RoomsScreenProps> = ({ currentUser, selectedBranchId, onShowToast }) => {
-  const [activeTab, setActiveTab] = useState<'types' | 'rooms'>('types');
+const emptyRoomForm = {
+  apartment_id: 0,
+  room_type_parent_id: 0,
+  room_type_id: 0,
+  room_number: '',
+  room_quantity: 1,
+  floor: 1,
+  note: '',
+  status: 'available' as 'available' | 'maintenance',
+  initial_block_reason: '',
+  feature_ids: [] as number[],
+  special_features: '',
+};
+
+export const RoomsScreen: React.FC<RoomsScreenProps> = ({
+  currentUser,
+  selectedBranchId,
+  onShowToast,
+}) => {
+  const [activeTab, setActiveTab] = useState<'types' | 'rooms'>('rooms');
 
   // ---- Bộ lọc chi nhánh trên màn hình RoomsScreen ----
   const [screenBranchId, setScreenBranchId] = useState<number>(() => {
-    return currentUser.role === 'manager' ? (currentUser.branchId || 1) : (selectedBranchId || 0);
+    return currentUser.role === 'manager'
+      ? currentUser.branchId || 1
+      : selectedBranchId || 0;
   });
 
   useEffect(() => {
@@ -98,14 +95,61 @@ export const RoomsScreen: React.FC<RoomsScreenProps> = ({ currentUser, selectedB
     }
   }, [selectedBranchId, currentUser]);
 
-  const effectiveBranchId = currentUser.role === 'manager' ? (currentUser.branchId || 1) : screenBranchId;
+  const effectiveBranchId =
+    currentUser.role === 'manager' ? currentUser.branchId || 1 : screenBranchId;
+
+  // ---- Branches for form ----
+  const [branches, setBranches] = useState<{ id: number; name: string }[]>([]);
+  useEffect(() => {
+    adminApi
+      .getBranches(currentUser.role)
+      .then((data) => {
+        setBranches(Array.isArray(data) ? data.map((b) => ({ id: b.id, name: b.name })) : []);
+      })
+      .catch(() => {});
+  }, [currentUser.role]);
+
+  // ---- Room feature catalog ----
+  const [roomFeatures, setRoomFeatures] = useState<RoomFeatureItem[]>([]);
+  const [amenityCatalog,setAmenityCatalog] = useState<AmenityItem[]>([]);
+  const [newAmenityName,setNewAmenityName] = useState('');
+  const [newAmenityCategory,setNewAmenityCategory] = useState('Tiện nghi');
+  const [savingAmenity,setSavingAmenity] = useState(false);
+  useEffect(()=>{getAmenities().then(setAmenityCatalog).catch(()=>setAmenityCatalog([]));},[]);
+  const addAmenity=async()=>{
+    if(!newAmenityName.trim())return onShowToast('Nhập tên tiện ích trước khi thêm.','warning');
+    setSavingAmenity(true);
+    try{
+      const {data}=await api.post('/admin/amenities',{name:newAmenityName.trim(),category:newAmenityCategory.trim()});
+      setAmenityCatalog(await getAmenities());
+      setRtForm(current=>({...current,amenity_ids:[...current.amenity_ids,Number(data.id)]}));
+      setNewAmenityName('');
+      onShowToast('Đã thêm tiện ích vào danh mục. Hãy lưu loại phòng để gắn tiện ích.','success');
+    }catch(error:any){onShowToast(error?.response?.data?.message||'Chưa thêm được tiện ích.','error');}
+    finally{setSavingAmenity(false);}
+  };
+
+  const loadGroupsAndFeatures = useCallback(async () => {
+    try {
+      const featuresData = await adminApi.getRoomFeatures(currentUser.role, false);
+      setRoomFeatures(Array.isArray(featuresData) ? featuresData : []);
+    } catch {}
+  }, [currentUser.role]);
+
+  useEffect(() => {
+    loadGroupsAndFeatures();
+  }, [loadGroupsAndFeatures]);
 
   // ---- Loại phòng state ----
   const [roomTypes, setRoomTypes] = useState<RoomTypeItem[]>([]);
   const [rtLoading, setRtLoading] = useState(true);
   const [showRtDrawer, setShowRtDrawer] = useState(false);
   const [isNewRt, setIsNewRt] = useState(false);
-  const [rtForm, setRtForm] = useState<typeof emptyRoomTypeForm & { id?: number }>(emptyRoomTypeForm);
+  const [rtForm, setRtForm] = useState<typeof emptyRoomTypeForm & { id?: number }>(
+    emptyRoomTypeForm
+  );
+  const [variantEditor, setVariantEditor] = useState<{ id?: number; name: string; price: string } | null>(null);
+  const [newImageUrl, setNewImageUrl] = useState('');
   const [rtSaving, setRtSaving] = useState(false);
 
   // ---- Phòng cụ thể state ----
@@ -113,335 +157,393 @@ export const RoomsScreen: React.FC<RoomsScreenProps> = ({ currentUser, selectedB
   const [roomsLoading, setRoomsLoading] = useState(true);
   const [showRoomDrawer, setShowRoomDrawer] = useState(false);
   const [isNewRoom, setIsNewRoom] = useState(false);
-  const [roomForm, setRoomForm] = useState<{ id?: number; apartment_id: number; room_type_id: number; room_number: string; status: RoomStatus; special_features?: string }>(emptyRoomForm);
+  const [roomForm, setRoomForm] = useState<typeof emptyRoomForm & { id?: number }>(
+    emptyRoomForm
+  );
   const [roomSaving, setRoomSaving] = useState(false);
 
-  // ---- Status change — vòng lặp trạng thái ----
-  const [showStatusConfirm, setShowStatusConfirm] = useState(false);
-  const [statusTarget, setStatusTarget] = useState<RoomItem | null>(null);
-  const [statusTargetNext, setStatusTargetNext] = useState<RoomStatus | null>(null);
-  const [statusReason, setStatusReason] = useState('');
-  const [showBlockedTooltip, setShowBlockedTooltip] = useState<number | null>(null);
+  // ---- Bộ lọc nâng cao cho danh sách phòng ----
+  const [filterFloor, setFilterFloor] = useState<string>('all');
+  const [filterFeature, setFilterFeature] = useState<string>('all');
+  const [filterStatus, setFilterStatus] = useState<string>('all');
 
-  // ---- Maintenance toggle (riêng biệt) ----
-  const [showMaintenanceConfirm, setShowMaintenanceConfirm] = useState(false);
-  const [maintenanceTarget, setMaintenanceTarget] = useState<RoomItem | null>(null);
-  const [maintenanceReason, setMaintenanceReason] = useState('');
+  // ---- Tickbox chọn nhiều phòng ----
+  const [selectedRoomIds, setSelectedRoomIds] = useState<number[]>([]);
+
+  // ---- Modal states ----
+  const [showManageModal, setShowManageModal] = useState(false);
+  const [blockModalTarget, setBlockModalTarget] = useState<RoomItem | null>(null);
 
   // ---- Load data ----
   const loadRoomTypes = useCallback(async () => {
     setRtLoading(true);
     try {
-      const aptId = currentUser.role === 'manager' ? (currentUser.branchId || undefined) : (selectedBranchId || undefined);
+      const aptId =
+        currentUser.role === 'manager'
+          ? currentUser.branchId || undefined
+          : effectiveBranchId || undefined;
       const data = await adminApi.getAdminRoomTypes(currentUser.role, aptId);
       setRoomTypes(Array.isArray(data) ? data : []);
-    } catch { onShowToast('Không tải được danh sách loại phòng.', 'error'); }
-    finally { setRtLoading(false); }
-  }, [currentUser.role, currentUser.branchId, selectedBranchId]);
+    } catch {
+      onShowToast('Không tải được danh sách loại phòng.', 'error');
+    } finally {
+      setRtLoading(false);
+    }
+  }, [currentUser.role, currentUser.branchId, effectiveBranchId, onShowToast]);
 
   const loadRooms = useCallback(async () => {
     setRoomsLoading(true);
     try {
-      const aptId = currentUser.role === 'manager' ? (currentUser.branchId || undefined) : (selectedBranchId || undefined);
-      const data = await adminApi.getRooms(currentUser.role, aptId ? { apartment_id: aptId } : undefined);
+      const aptId =
+        currentUser.role === 'manager'
+          ? currentUser.branchId || undefined
+          : effectiveBranchId || undefined;
+      const data = await adminApi.getRooms(
+        currentUser.role,
+        aptId ? { apartment_id: aptId } : undefined
+      );
       setRooms(Array.isArray(data) ? data : []);
-    } catch { onShowToast('Không tải được danh sách phòng.', 'error'); }
-    finally { setRoomsLoading(false); }
-  }, [currentUser.role, currentUser.branchId, selectedBranchId]);
+    } catch {
+      onShowToast('Không tải được danh sách phòng.', 'error');
+    } finally {
+      setRoomsLoading(false);
+    }
+  }, [currentUser.role, currentUser.branchId, effectiveBranchId, onShowToast]);
 
-  useEffect(() => { loadRoomTypes(); }, [loadRoomTypes]);
-  useEffect(() => { loadRooms(); }, [loadRooms]);
+  useEffect(() => {
+    loadRoomTypes();
+  }, [loadRoomTypes]);
+
+  useEffect(() => {
+    loadRooms();
+  }, [loadRooms]);
 
   // ---- Room Type CRUD ----
   const handleSaveRoomType = async () => {
-    if (!rtForm.name.trim()) { onShowToast('Vui lòng nhập tên loại phòng.', 'error'); return; }
-    if (!rtForm.apartment_id) { onShowToast('Vui lòng chọn chi nhánh.', 'error'); return; }
+    if (!rtForm.name.trim()) {
+      onShowToast('Vui lòng nhập tên loại phòng.', 'error');
+      return;
+    }
+    if (!rtForm.apartment_id) {
+      onShowToast('Vui lòng chọn chi nhánh.', 'error');
+      return;
+    }
     setRtSaving(true);
     try {
+      const data = { ...rtForm, base_price: 0, image_urls: rtForm.image_urls.filter(url => url.trim()) };
       if (isNewRt) {
-        await adminApi.createRoomType(rtForm, currentUser.role);
+        const created = await adminApi.createRoomType(data, currentUser.role);
+        if (created?.id) {
+          setRtForm(current => ({ ...current, id: Number(created.id) }));
+          setIsNewRt(false);
+          onShowToast(`Đã thêm loại phòng "${rtForm.name}". Bạn có thể tạo biến thể bên dưới.`, 'success');
+          await loadRoomTypes();
+          return;
+        }
         onShowToast(`Đã thêm loại phòng "${rtForm.name}"!`, 'success');
       } else if (rtForm.id) {
-        const { id, apartment_id, ...updateData } = rtForm;
-        await adminApi.updateRoomType(id, updateData, currentUser.role);
+        const { id, apartment_id, ...updateData } = data;
+        await adminApi.updateRoomType(rtForm.id, updateData, currentUser.role);
         onShowToast(`Đã cập nhật loại phòng "${rtForm.name}"!`, 'success');
       }
       setShowRtDrawer(false);
+      setVariantEditor(null);
       await loadRoomTypes();
     } catch (err: any) {
       onShowToast(err?.response?.data?.message || 'Lỗi khi lưu loại phòng.', 'error');
-    } finally { setRtSaving(false); }
-  };
-
-  const handleHideRoomType = async (rt: RoomTypeItem) => {
-    try {
-      await adminApi.hideRoomType(rt.id, currentUser.role);
-      onShowToast(`Đã ẩn loại phòng "${rt.name}".`, 'warning');
-      await loadRoomTypes();
-    } catch (err: any) {
-      onShowToast(err?.response?.data?.message || 'Lỗi khi ẩn loại phòng.', 'error');
+    } finally {
+      setRtSaving(false);
     }
   };
 
-  // ---- Room CRUD ----
+  const saveRoomVariant = async () => {
+    if (!rtForm.id || currentUser.role !== 'admin') return;
+    const price = Number(variantEditor?.price.replace(/[.,\s]/g, '') || '');
+    if (!variantEditor?.name.trim() || !Number.isSafeInteger(price) || price <= 0) {
+      onShowToast('Nhập tên biến thể và giá mỗi đêm hợp lệ.', 'error');
+      return;
+    }
+    setRtSaving(true);
+    try {
+      if (variantEditor.id) {
+        await adminApi.updateRoomType(variantEditor.id, { name: variantEditor.name.trim(), base_price: price }, currentUser.role);
+        onShowToast('Đã cập nhật biến thể.', 'success');
+      } else {
+        await adminApi.createRoomType({
+          parent_id: rtForm.id,
+          apartment_id: rtForm.apartment_id,
+          name: variantEditor.name.trim(),
+          base_price: price,
+          max_occupancy: rtForm.max_occupancy,
+          bed_config: rtForm.bed_config,
+          is_active: true,
+        }, currentUser.role);
+        onShowToast('Đã thêm biến thể mới.', 'success');
+      }
+      setVariantEditor(null);
+      await loadRoomTypes();
+    } catch (err: any) {
+      onShowToast(err?.response?.data?.message || 'Lỗi khi lưu biến thể.', 'error');
+    } finally {
+      setRtSaving(false);
+    }
+  };
+
+  // ---- Room CRUD (Drawer Thêm/Sửa phòng nâng cấp) ----
+  const handleRoomNumberChange = (val: string) => {
+    const norm = normalizeRoomNumber(val);
+    const suggested = suggestFloor(norm);
+    setRoomForm((prev) => ({
+      ...prev,
+      room_number: val,
+      floor: suggested !== null ? suggested : prev.floor,
+    }));
+  };
+
+  const generateRoomNumbersPlan = (apartmentId: number, startFloor: number, count: number) => {
+    const branchRooms = rooms.filter(room => room.apartment_id === apartmentId && !room.deleted_at);
+    const parse = (value: string) => value.match(/^([A-Za-z-]*)(\d+)$/);
+    const plan: Array<{ floor: number; roomNumbers: string[] }> = [];
+    let remaining = Math.max(0, Math.min(100, Math.floor(count)));
+    let floor = startFloor;
+    let visitedFloors = 0;
+
+    while (remaining > 0 && visitedFloors < 100) {
+      visitedFloors++;
+      const floorRooms = branchRooms.filter(room => Number(room.floor) > 0 ? Number(room.floor) === floor : Number(suggestFloor(room.room_number) ?? 0) === floor);
+      const prefix = floorRooms.map(room => parse(room.room_number)?.[1]).find(Boolean)
+        || branchRooms.map(room => parse(room.room_number)?.[1]).find(Boolean)
+        || 'B';
+      const floorStart = floor > 0 ? floor * 100 + 1 : 1;
+      const floorEnd = floor * 100 + 20;
+      const maxExisting = Math.max(0, ...floorRooms.map(room => {
+        const match = parse(room.room_number);
+        return match && match[1].toUpperCase() === prefix.toUpperCase() ? Number(match[2]) : 0;
+      }));
+      let nextNumber = maxExisting ? maxExisting + 1 : floorStart;
+
+      while (nextNumber <= floorEnd && floorRooms.length + (plan.find(group => group.floor === floor)?.roomNumbers.length || 0) >= 20) {
+        nextNumber = floorEnd + 1;
+      }
+      const capacityByCount = Math.max(0, 20 - floorRooms.length - (plan.find(group => group.floor === floor)?.roomNumbers.length || 0));
+      const capacityByNumber = Math.max(0, floorEnd - nextNumber + 1);
+      const allocate = Math.min(remaining, capacityByCount, capacityByNumber);
+
+      if (allocate > 0) {
+        const roomNumbers = Array.from({ length: allocate }, (_, index) => `${prefix}${String(nextNumber + index).padStart(3, '0')}`);
+        const existingGroup = plan.find(group => group.floor === floor);
+        if (existingGroup) existingGroup.roomNumbers.push(...roomNumbers);
+        else plan.push({ floor, roomNumbers });
+        remaining -= allocate;
+      }
+      if (remaining > 0) floor++;
+    }
+
+    return remaining === 0 ? plan : [];
+  };
+
+  const handleToggleRoomFeature = (featId: number) => {
+    setRoomForm((prev) => {
+      const exists = prev.feature_ids.includes(featId);
+      return {
+        ...prev,
+        feature_ids: exists
+          ? prev.feature_ids.filter((id) => id !== featId)
+          : [...prev.feature_ids, featId],
+      };
+    });
+  };
+
   const handleSaveRoom = async () => {
-    if (!roomForm.room_number.trim()) { onShowToast('Vui lòng nhập số phòng.', 'error'); return; }
-    if (!roomForm.room_type_id) { onShowToast('Vui lòng chọn loại phòng.', 'error'); return; }
-    if (!roomForm.apartment_id) { onShowToast('Vui lòng chọn chi nhánh.', 'error'); return; }
+    if (!roomForm.room_type_id) {
+      onShowToast('Vui lòng chọn loại phòng.', 'error');
+      return;
+    }
+    if (!roomForm.apartment_id) {
+      onShowToast('Vui lòng chọn chi nhánh.', 'error');
+      return;
+    }
+    if (isNewRoom && roomForm.status === 'maintenance' && !roomForm.initial_block_reason.trim()) {
+      onShowToast('Bắt buộc nhập lý do bảo trì khi chọn trạng thái Bảo trì ban đầu.', 'warning');
+      return;
+    }
+
     setRoomSaving(true);
     try {
       if (isNewRoom) {
-        await adminApi.createRoom(roomForm, currentUser.role);
-        onShowToast(`Đã thêm phòng "${roomForm.room_number}"!`, 'success');
+        const count = Number(roomForm.room_quantity);
+        if (!Number.isInteger(count) || count < 1 || count > 100 || !Number.isInteger(Number(roomForm.floor)) || Number(roomForm.floor) < 0) {
+          onShowToast('Nhập số lượng từ 1 đến 100 và tầng hợp lệ.', 'error');
+          return;
+        }
+        const roomPlan = generateRoomNumbersPlan(roomForm.apartment_id, Number(roomForm.floor), count);
+        if (!roomPlan.length || roomPlan.reduce((total, group) => total + group.roomNumbers.length, 0) !== count) {
+          onShowToast('Không thể phân bổ số phòng trong giới hạn 20 phòng mỗi tầng.', 'error');
+          return;
+        }
+        await adminApi.newBatchCreateRooms({
+          apartment_id: roomForm.apartment_id,
+          default_status: roomForm.status,
+          initial_block_reason: roomForm.initial_block_reason,
+          groups: roomPlan.map(group => ({ label: `Tầng ${group.floor}`, parentRoomTypeId: roomForm.room_type_parent_id, roomTypeId: roomForm.room_type_id, roomNumbers: group.roomNumbers })),
+        }, currentUser.role);
+        onShowToast(`Đã tạo ${count} phòng trên ${roomPlan.length} tầng.`, 'success');
       } else if (roomForm.id) {
-        const { id, ...updateData } = roomForm;
-        await adminApi.updateRoom(id, updateData, currentUser.role);
-        onShowToast(`Đã cập nhật phòng "${roomForm.room_number}"!`, 'success');
+        if (!roomForm.room_number.trim()) {
+          onShowToast('Vui lòng nhập số phòng.', 'error');
+          return;
+        }
+        await adminApi.updateRoom(
+          roomForm.id,
+          {
+            apartment_id: roomForm.apartment_id,
+            room_type_id: roomForm.room_type_id,
+            room_number: normalizeRoomNumber(roomForm.room_number),
+            floor: Number(roomForm.floor),
+            note: roomForm.note.trim() || undefined,
+            status: roomForm.status,
+            feature_ids: roomForm.feature_ids,
+            special_features: roomForm.special_features.trim() || undefined,
+          },
+          currentUser.role
+        );
+        onShowToast(`Đã cập nhật thông tin phòng "${roomForm.room_number}"!`, 'success');
       }
       setShowRoomDrawer(false);
       await loadRooms();
     } catch (err: any) {
-      onShowToast(err?.response?.data?.message || 'Lỗi khi lưu phòng.', 'error');
-    } finally { setRoomSaving(false); }
-  };
-
-  // ---- Vòng lặp trạng thái phòng ----
-  const handleStatusCycleClick = (room: RoomItem) => {
-    const cfg = ROOM_STATUS_CONFIG[room.status as RoomStatus] || ROOM_STATUS_CONFIG.available;
-    if (!cfg.canManual) {
-      setShowBlockedTooltip(room.room_id);
-      setTimeout(() => setShowBlockedTooltip(null), 3000);
-      return;
-    }
-    setStatusTarget(room);
-    setStatusTargetNext(cfg.nextStatus);
-    setStatusReason('');
-    setShowStatusConfirm(true);
-  };
-
-  const handleConfirmStatusChange = async () => {
-    if (!statusTarget || !statusTargetNext) return;
-    try {
-      await adminApi.updateRoomStatus(statusTarget.room_id, statusTargetNext, statusReason, currentUser.role);
-      const nextLabel = ROOM_STATUS_CONFIG[statusTargetNext]?.label || statusTargetNext;
-      onShowToast(`Đã chuyển phòng ${statusTarget.room_number} sang "${nextLabel}".`, 'success');
-      setShowStatusConfirm(false);
-      setStatusTarget(null);
-      setStatusTargetNext(null);
-      setStatusReason('');
-      await loadRooms();
-    } catch (err: any) {
-      onShowToast(err?.response?.data?.message || 'Lỗi khi đổi trạng thái phòng.', 'error');
+      onShowToast(err?.response?.data?.message || err?.message || 'Lỗi khi lưu phòng.', 'error');
+    } finally {
+      setRoomSaving(false);
     }
   };
 
-  // ---- Toggle Bảo trì (available ↔ maintenance) ----
-  const handleToggleMaintenance = (room: RoomItem) => {
-    setMaintenanceTarget(room);
-    setMaintenanceReason('');
-    setShowMaintenanceConfirm(true);
-  };
-
-  const handleConfirmMaintenance = async () => {
-    if (!maintenanceTarget) return;
-    const nextStatus: RoomStatus = maintenanceTarget.status === 'maintenance' ? 'available' : 'maintenance';
+  // Đổi Housekeeping (Sạch ↔ Cần dọn)
+  const handleToggleHousekeeping = async (room: RoomItem) => {
+    const nextHk = room.housekeeping === 'dirty' ? 'clean' : 'dirty';
     try {
-      await adminApi.updateRoomStatus(maintenanceTarget.room_id, nextStatus, maintenanceReason, currentUser.role);
+      await adminApi.updateHousekeeping(room.room_id, nextHk, currentUser.role);
       onShowToast(
-        `Đã chuyển phòng ${maintenanceTarget.room_number} sang "${nextStatus === 'maintenance' ? 'Bảo trì' : 'Trống'}".`,
-        nextStatus === 'maintenance' ? 'warning' : 'success'
+        `Phòng ${room.room_number} đã chuyển sang "${nextHk === 'clean' ? 'Sạch sẽ' : 'Cần dọn dẹp'}".`,
+        'success'
       );
-      setShowMaintenanceConfirm(false);
-      setMaintenanceTarget(null);
-      setMaintenanceReason('');
       await loadRooms();
     } catch (err: any) {
-      onShowToast(err?.response?.data?.message || 'Lỗi khi đổi trạng thái phòng.', 'error');
+      onShowToast(err?.response?.data?.message || err?.message || 'Lỗi khi đổi dọn dẹp.', 'error');
     }
   };
 
+  // Ẩn / Hiện phòng
   const handleHideRoom = async (room: RoomItem) => {
     try {
       if (room.is_hidden) {
         await adminApi.unhideRoom(room.room_id, currentUser.role);
-        onShowToast(`Đã hiện lại phòng ${room.room_number}.`, 'success');
+        onShowToast(`Đã mở lại phòng ${room.room_number}.`, 'success');
       } else {
         await adminApi.hideRoom(room.room_id, currentUser.role);
-        onShowToast(`Đã ẩn phòng ${room.room_number}.`, 'warning');
+        onShowToast(`Đã tạm ẩn phòng ${room.room_number}.`, 'warning');
       }
       await loadRooms();
     } catch (err: any) {
-      onShowToast(err?.response?.data?.message || 'Lỗi khi thay đổi hiển thị phòng.', 'error');
+      onShowToast(err?.response?.data?.message || err?.message || 'Không thể thay đổi ẩn phòng.', 'error');
     }
   };
 
-  // ---- Branches for form ----
-  const [branches, setBranches] = useState<{ id: number; name: string }[]>([]);
-  useEffect(() => {
-    adminApi.getBranches(currentUser.role).then((data) => {
-      setBranches(Array.isArray(data) ? data.map((b) => ({ id: b.id, name: b.name })) : []);
-    }).catch(() => {});
-  }, [currentUser.role]);
-
-  // ---- Batch Create Rooms State & Handlers ----
-  const [showBatchModal, setShowBatchModal] = useState(false);
-  const [batchBranchId, setBatchBranchId] = useState<number>(1);
-  const [batchRoomTypeId, setBatchRoomTypeId] = useState<number>(0);
-  const [batchPrefix, setBatchPrefix] = useState('P');
-  const [batchStartDigits, setBatchStartDigits] = useState('001');
-  const [latestDetectedRoom, setLatestDetectedRoom] = useState<string | null>(null);
-  const [batchCount, setBatchCount] = useState<number>(5);
-  const [batchSkip4, setBatchSkip4] = useState(true);
-  const [batchSkip13, setBatchSkip13] = useState(true);
-  const [batchDefaultStatus, setBatchDefaultStatus] = useState<'available' | 'maintenance'>('available');
-  const [batchRooms, setBatchRooms] = useState<Array<{
-    id: string;
-    room_number: string;
-    special_features: string;
-    status: 'available' | 'maintenance';
-    isDuplicate: boolean;
-  }>>([]);
-  const [quickFeatureText, setQuickFeatureText] = useState('');
-  const [batchSaving, setBatchSaving] = useState(false);
-
-  const updateSuggestedStartDigits = (prefix: string, branchId: number, skip4Val = batchSkip4, skip13Val = batchSkip13) => {
-    const branchRooms = rooms.filter(r => r.apartment_id === branchId).map(r => r.room_number);
-    const { latestRoom, nextDigits } = findNextStartDigitsForPrefix(branchRooms, prefix, skip4Val, skip13Val);
-    setLatestDetectedRoom(latestRoom);
-    setBatchStartDigits(nextDigits);
-  };
-
-  const openBatchModal = () => {
-    const initialBranch = effectiveBranchId > 0 ? effectiveBranchId : (branches[0]?.id || 1);
-    setBatchBranchId(initialBranch);
-    const availableTypes = roomTypes.filter(rt => rt.apartment_id === initialBranch);
-    setBatchRoomTypeId(availableTypes[0]?.id || 0);
-    setBatchPrefix('P');
-    setBatchCount(5);
-    setBatchSkip4(true);
-    setBatchSkip13(true);
-    setBatchDefaultStatus('available');
-    setBatchRooms([]);
-    setQuickFeatureText('');
-
-    const branchRooms = rooms.filter(r => r.apartment_id === initialBranch).map(r => r.room_number);
-    const { latestRoom, nextDigits } = findNextStartDigitsForPrefix(branchRooms, 'P', true, true);
-    setLatestDetectedRoom(latestRoom);
-    setBatchStartDigits(nextDigits);
-
-    setShowBatchModal(true);
-  };
-
-  const handleGenerateBatchRooms = () => {
-    if (!batchRoomTypeId) {
-      onShowToast('Vui lòng chọn loại phòng trước khi sinh danh sách.', 'warning');
+  // Xóa mềm phòng (chỉ admin, không xóa phòng từng có đơn)
+  const handleDeleteRoom = async (room: RoomItem) => {
+    if (!window.confirm(`Bạn có chắc muốn xóa phòng ${room.room_number}? Thao tác này không thể hoàn tác nếu phòng chưa từng có đơn.`)) {
       return;
     }
-    const targetBranchRooms = rooms.filter(r => r.apartment_id === batchBranchId).map(r => r.room_number);
-    const generated = generateFloorRoomsBatch(
-      batchPrefix,
-      batchStartDigits,
-      batchCount,
-      batchSkip4,
-      batchSkip13,
-      targetBranchRooms
-    );
-
-    setBatchRooms(generated.map(g => ({
-      ...g,
-      status: batchDefaultStatus,
-    })));
-  };
-
-  const handleUpdateBatchRoom = (id: string, field: 'room_number' | 'special_features' | 'status', value: any) => {
-    setBatchRooms(prev => {
-      const targetBranchRooms = rooms.filter(r => r.apartment_id === batchBranchId);
-      const existingNumbers = new Set(targetBranchRooms.map(r => r.room_number.toLowerCase()));
-
-      return prev.map(r => {
-        if (r.id === id) {
-          const updated = { ...r, [field]: value };
-          if (field === 'room_number') {
-            const isDup = existingNumbers.has(value.trim().toLowerCase());
-            updated.isDuplicate = isDup;
-          }
-          return updated;
-        }
-        return r;
-      });
-    });
-  };
-
-  const handleDeleteBatchRoom = (id: string) => {
-    setBatchRooms(prev => prev.filter(r => r.id !== id));
-  };
-
-  const handleApplyQuickFeatures = () => {
-    if (!quickFeatureText.trim()) {
-      onShowToast('Vui lòng nhập nội dung đặc điểm trước khi áp dụng nhanh.', 'warning');
-      return;
-    }
-    setBatchRooms(prev => prev.map(r => ({
-      ...r,
-      special_features: r.special_features.trim() ? r.special_features : quickFeatureText.trim()
-    })));
-    onShowToast('Đã áp dụng đặc điểm cho các phòng còn trống!', 'info');
-  };
-
-  const handleSaveBatchRooms = async () => {
-    if (!batchBranchId) { onShowToast('Vui lòng chọn chi nhánh.', 'error'); return; }
-    if (!batchRoomTypeId) { onShowToast('Vui lòng chọn loại phòng.', 'error'); return; }
-    if (batchRooms.length === 0) { onShowToast('Chưa có phòng nào được sinh. Hãy bấm "Tạo danh sách phòng".', 'error'); return; }
-
-    const hasDuplicate = batchRooms.some(r => r.isDuplicate);
-    if (hasDuplicate) {
-      onShowToast('Có phòng bị trùng số với chi nhánh. Vui lòng sửa hoặc xóa phòng bị trùng trước khi lưu!', 'error');
-      return;
-    }
-
-    const numbers = batchRooms.map(r => r.room_number.trim().toLowerCase());
-    if (new Set(numbers).size < numbers.length) {
-      onShowToast('Có số phòng bị trùng lặp trong chính danh sách tạo mới!', 'error');
-      return;
-    }
-
-    setBatchSaving(true);
     try {
-      const payload = {
-        apartment_id: batchBranchId,
-        room_type_id: batchRoomTypeId,
-        rooms: batchRooms.map(r => ({
-          room_number: r.room_number.trim(),
-          special_features: r.special_features.trim() || undefined,
-          status: r.status,
-        })),
-      };
-
-      const res = await adminApi.batchCreateRooms(payload, currentUser.role);
-      onShowToast(res?.message || `Đã tạo thành công ${batchRooms.length} phòng mới!`, 'success');
-      setShowBatchModal(false);
-      setBatchRooms([]);
+      await adminApi.deleteRoom(room.room_id, currentUser.role);
+      onShowToast(`Đã xóa phòng ${room.room_number}.`, 'success');
       await loadRooms();
     } catch (err: any) {
-      onShowToast(err?.response?.data?.message || 'Lỗi khi tạo hàng loạt phòng.', 'error');
-    } finally {
-      setBatchSaving(false);
+      onShowToast(err?.response?.data?.message || err?.message || 'Không thể xóa phòng.', 'error');
     }
   };
 
-  // Lọc danh sách theo chi nhánh
+  // ---- Quản lý Tickbox nhiều phòng ----
+  const handleToggleSelectAll = (checked: boolean) => {
+    if (checked) {
+      setSelectedRoomIds(filteredRooms.map((r) => r.room_id));
+    } else {
+      setSelectedRoomIds([]);
+    }
+  };
+
+  const handleToggleSelectRoom = (roomId: number) => {
+    setSelectedRoomIds((prev) =>
+      prev.includes(roomId) ? prev.filter((id) => id !== roomId) : [...prev, roomId]
+    );
+  };
+
+  // ---- Lọc phòng hiển thị ----
+  const selectableParents = useMemo(() => roomTypes.filter(parent => parent.is_active && (parent.variants || []).some(variant => variant.is_active)), [roomTypes]);
+  const selectedParentType = roomTypes.find(parent => parent.id === roomForm.room_type_parent_id);
+  const selectedParentVariants = (selectedParentType?.variants || []).filter(variant => variant.is_active);
+  const roomNumberPreview = generateRoomNumbersPlan(roomForm.apartment_id, Number(roomForm.floor), Number(roomForm.room_quantity));
+
   const filteredRoomTypes = effectiveBranchId > 0
     ? roomTypes.filter((rt) => rt.apartment_id === effectiveBranchId)
     : roomTypes;
 
-  const filteredRooms = sortRoomsNatural(
-    effectiveBranchId > 0
+  const filteredRooms = useMemo(() => {
+    let list = effectiveBranchId > 0
       ? rooms.filter((r) => r.apartment_id === effectiveBranchId)
-      : rooms
-  );
+      : rooms;
+
+    // Lọc theo tầng
+    if (filterFloor !== 'all') {
+      list = list.filter((r) => String(r.floor ?? suggestFloor(r.room_number) ?? 0) === filterFloor);
+    }
+    // Lọc theo nhóm phòng
+    // Lọc theo đặc điểm
+    if (filterFeature !== 'all') {
+      const featId = Number(filterFeature);
+      list = list.filter((r) => r.feature_ids && r.feature_ids.includes(featId));
+    }
+    // Lọc theo trạng thái tính toán
+    if (filterStatus !== 'all') {
+      list = list.filter((r) => (r.display_status || computeRoomDisplayStatus({ housekeeping: r.housekeeping }, [], false)) === filterStatus);
+    }
+
+    // Sắp xếp tự nhiên: floor trước, room_number sau
+    return [...list].sort((a, b) => {
+      const floorA = a.floor ?? suggestFloor(a.room_number) ?? 0;
+      const floorB = b.floor ?? suggestFloor(b.room_number) ?? 0;
+      if (floorA !== floorB) return floorA - floorB;
+      return a.room_number.localeCompare(b.room_number, undefined, { numeric: true, sensitivity: 'base' });
+    });
+  }, [rooms, effectiveBranchId, filterFloor, filterFeature, filterStatus]);
+
+  // Danh sách các tầng xuất hiện trong data
+  const availableFloors = useMemo(() => {
+    const s = new Set<number>();
+    rooms.forEach((r) => {
+      const f = r.floor ?? suggestFloor(r.room_number) ?? 0;
+      s.add(f);
+    });
+    return Array.from(s).sort((a, b) => a - b);
+  }, [rooms]);
+
+  // Helper render badge trạng thái tính toán
+  const renderDisplayStatusBadge = (statusLabel?: string) => {
+    switch (statusLabel) {
+      case 'Bảo trì':
+        return <Badge variant="danger" size="sm">🔴 Bảo trì</Badge>;
+      case 'Đang lưu trú':
+        return <Badge variant="info" size="sm">🔵 Đang lưu trú</Badge>;
+      case 'Cần dọn dẹp':
+        return <Badge variant="warning" size="sm">🟡 Cần dọn dẹp</Badge>;
+      case 'Sẵn sàng':
+      default:
+        return <Badge variant="success" size="sm">🟢 Sẵn sàng</Badge>;
+    }
+  };
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4">
       {/* Tab Switcher & Top Actions */}
       <div className="flex flex-wrap items-center justify-between gap-3 bg-white p-3 border border-[#E5E0D8] rounded-[6px]">
         <div className="flex flex-wrap items-center gap-3">
@@ -449,7 +551,9 @@ export const RoomsScreen: React.FC<RoomsScreenProps> = ({ currentUser, selectedB
             <button
               onClick={() => setActiveTab('types')}
               className={`px-4 py-2 rounded-[4px] font-semibold transition-colors cursor-pointer ${
-                activeTab === 'types' ? 'bg-[#B4532A] text-white' : 'bg-[#F4F2EE] text-[#44403C] hover:bg-[#EBE7E0]'
+                activeTab === 'types'
+                  ? 'bg-[#B4532A] text-white'
+                  : 'bg-[#F4F2EE] text-[#44403C] hover:bg-[#EBE7E0]'
               }`}
             >
               1. Loại phòng ({filteredRoomTypes.length})
@@ -457,16 +561,20 @@ export const RoomsScreen: React.FC<RoomsScreenProps> = ({ currentUser, selectedB
             <button
               onClick={() => setActiveTab('rooms')}
               className={`px-4 py-2 rounded-[4px] font-semibold transition-colors cursor-pointer ${
-                activeTab === 'rooms' ? 'bg-[#B4532A] text-white' : 'bg-[#F4F2EE] text-[#44403C] hover:bg-[#EBE7E0]'
+                activeTab === 'rooms'
+                  ? 'bg-[#B4532A] text-white'
+                  : 'bg-[#F4F2EE] text-[#44403C] hover:bg-[#EBE7E0]'
               }`}
             >
               2. Phòng ({filteredRooms.length})
             </button>
           </div>
 
-          {/* Bộ lọc chi nhánh trực tiếp trên màn hình Quản lý phòng */}
+          {/* Bộ lọc chi nhánh trực tiếp */}
           <div className="flex items-center gap-2 border-l border-[#E5E0D8] pl-3">
-            <span className="text-xs font-semibold text-[#78716C] whitespace-nowrap">🏢 Chi nhánh:</span>
+            <span className="text-xs font-semibold text-[#78716C] whitespace-nowrap">
+              🏢 Chi nhánh:
+            </span>
             <select
               value={effectiveBranchId}
               disabled={currentUser.role === 'manager'}
@@ -475,7 +583,9 @@ export const RoomsScreen: React.FC<RoomsScreenProps> = ({ currentUser, selectedB
             >
               <option value={0}>Tất cả chi nhánh</option>
               {branches.map((b) => (
-                <option key={b.id} value={b.id}>{b.name}</option>
+                <option key={b.id} value={b.id}>
+                  {b.name}
+                </option>
               ))}
             </select>
           </div>
@@ -483,37 +593,65 @@ export const RoomsScreen: React.FC<RoomsScreenProps> = ({ currentUser, selectedB
 
         <div className="flex items-center gap-2">
           {currentUser.role === 'manager' && (
-            <Badge variant="warning" size="sm">Chỉ xem • Được đổi trạng thái phòng</Badge>
+            <Badge variant="warning" size="sm">
+              Quản lý chi nhánh • Chỉ đổi dọn dẹp (Sạch/Cần dọn)
+            </Badge>
           )}
+
+          {false && currentUser.role === 'admin' && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setShowManageModal(true)}
+            >
+              ⚙️ Đặc điểm & Phụ thu
+            </Button>
+          )}
+
           {currentUser.role === 'admin' && activeTab === 'types' && (
             <Button
-              variant="primary" size="sm" icon={<IconPlus className="w-4 h-4" />}
+              variant="primary"
+              size="sm"
+              icon={<IconPlus className="w-4 h-4" />}
               onClick={() => {
                 setIsNewRt(true);
-                setRtForm({ ...emptyRoomTypeForm, apartment_id: effectiveBranchId > 0 ? effectiveBranchId : (branches[0]?.id || 1) });
+                setVariantEditor(null);
+                setNewImageUrl('');
+                setRtForm({
+                  ...emptyRoomTypeForm,
+                  apartment_id: effectiveBranchId > 0 ? effectiveBranchId : branches[0]?.id || 1,
+                });
                 setShowRtDrawer(true);
               }}
             >
               Thêm loại phòng
             </Button>
           )}
+
           {currentUser.role === 'admin' && activeTab === 'rooms' && (
             <div className="flex items-center gap-2">
               <Button
-                variant="outline" size="sm" icon={<IconPlus className="w-4 h-4" />}
-                onClick={openBatchModal}
-              >
-                Tạo nhiều phòng
-              </Button>
-              <Button
-                variant="primary" size="sm" icon={<IconPlus className="w-4 h-4" />}
+                variant="primary"
+                size="sm"
+                icon={<IconPlus className="w-4 h-4" />}
                 onClick={() => {
                   setIsNewRoom(true);
-                  setRoomForm({ ...emptyRoomForm, apartment_id: effectiveBranchId > 0 ? effectiveBranchId : (branches[0]?.id || 1), special_features: '' });
+                  const bId = effectiveBranchId > 0 ? effectiveBranchId : branches[0]?.id || 1;
+                  const firstParent = selectableParents.find((parent) => parent.apartment_id === bId);
+                  const firstVariant = firstParent?.variants?.find((variant) => variant.is_active);
+                  setRoomForm({
+                    ...emptyRoomForm,
+                    apartment_id: bId,
+                    room_type_parent_id: firstParent?.id || 0,
+                    room_type_id: firstVariant?.id || 0,
+                    room_number: '',
+                    room_quantity: 1,
+                    feature_ids: [],
+                  });
                   setShowRoomDrawer(true);
                 }}
               >
-                Thêm phòng
+                + Thêm phòng
               </Button>
             </div>
           )}
@@ -536,675 +674,568 @@ export const RoomsScreen: React.FC<RoomsScreenProps> = ({ currentUser, selectedB
           </TableHeader>
           <tbody>
             {rtLoading ? (
-              <tr><td colSpan={7} className="py-10 text-center text-xs text-[#78716C]">Đang tải...</td></tr>
+              <tr>
+                <td colSpan={7} className="py-10 text-center text-xs text-[#78716C]">
+                  Đang tải...
+                </td>
+              </tr>
             ) : filteredRoomTypes.length === 0 ? (
-              <tr><td colSpan={7} className="py-10 text-center text-xs text-[#78716C]">Không có loại phòng nào phù hợp với chi nhánh đã chọn.</td></tr>
-            ) : filteredRoomTypes.map((rt) => (
-              <TableRow key={rt.id}>
-                <td className="py-2.5 px-3.5">
-                  <div className="font-medium text-xs text-[#1C1917]">{rt.name}</div>
-                  {rt.description && <div className="text-[11px] text-[#78716C] line-clamp-1 mt-0.5">{rt.description}</div>}
+              <tr>
+                <td colSpan={7} className="py-10 text-center text-xs text-[#78716C]">
+                  Không có loại phòng nào phù hợp với chi nhánh đã chọn.
                 </td>
-                <td className="py-2.5 px-3.5 text-xs text-[#78716C]">{rt.apartment_name}</td>
-                <td className="py-2.5 px-3.5 text-xs">
-                  <span className="font-bold text-[#1C1917]">{rt.max_occupancy}</span>
-                  <span className="text-[#78716C]"> suất (&gt;15t)</span>
-                </td>
-                <td className="py-2.5 px-3.5 text-xs text-[#78716C]">{rt.bed_config || '—'}</td>
-                <td className="py-2.5 px-3.5 text-center font-mono font-bold text-xs text-[#1C1917]">
-                  {rt.total_rooms} phòng
-                </td>
-                <td className="py-2.5 px-3.5 text-right font-mono text-xs font-bold text-[#B4532A] tabular-nums">
-                  {formatMoney(rt.base_price)}
-                </td>
-                <td className="py-2.5 px-3.5 text-right">
-                  <div className="flex items-center justify-end gap-1.5">
-                    <Button
-                      variant="outline" size="sm" icon={<IconEdit className="w-3.5 h-3.5" />}
-                      onClick={() => {
+              </tr>
+            ) : (
+              filteredRoomTypes.map((rt) => (
+                <TableRow key={rt.id}>
+                  <td className="py-2.5 px-3.5">
+                    <div className="font-medium text-xs text-[#1C1917]">{rt.name}</div>
+                    {rt.description && <div className="text-[11px] text-[#78716C] line-clamp-1 mt-0.5">{rt.description}</div>}
+                  </td>
+                  <td className="py-2.5 px-3.5 text-xs text-[#78716C]">{rt.apartment_name}</td>
+                  <td className="py-2.5 px-3.5 text-xs"><strong>{rt.max_occupancy}</strong><span className="text-[#78716C]"> suất (&gt;15 tuổi)</span></td>
+                  <td className="py-2.5 px-3.5 text-xs text-[#78716C]">{rt.bed_config || '?'}</td>
+                  <td className="py-2.5 px-3.5 text-center font-mono font-bold text-xs text-[#1C1917]">{rt.total_rooms} phòng</td>
+                  <td className="py-2.5 px-3.5 text-right font-mono text-xs font-bold text-[#B4532A] tabular-nums">
+                    {rt.variants?.length ? `Từ ${formatMoney(Math.min(...rt.variants.map(variant => Number(variant.base_price))))}` : 'Chưa có biến thể'}
+                  </td>
+                  <td className="py-2.5 px-3.5 text-right">
+                    <div className="flex justify-end gap-1">
+                      <Button variant="outline" size="sm" icon={<IconEdit className="w-3.5 h-3.5" />} onClick={() => {
                         setIsNewRt(false);
-                        setRtForm({ id: rt.id, name: rt.name, apartment_id: rt.apartment_id, base_price: rt.base_price, max_occupancy: rt.max_occupancy, description: rt.description || '', bed_config: rt.bed_config || '', area: rt.area || 0, is_active: rt.is_active });
+                        setVariantEditor(null);
+                        setNewImageUrl('');
+                        setRtForm({
+                          id: rt.id,
+                          name: rt.name,
+                          amenity_ids: (rt.amenities || []).map(amenity => amenity.id),
+                          apartment_id: rt.apartment_id,
+                          max_occupancy: rt.max_occupancy,
+                          description: rt.description || '',
+                          bed_config: rt.bed_config || '',
+                          image_urls: Array.isArray(rt.images) ? rt.images.map(image => typeof image === 'string' ? image : (image as any).image_url) : [],
+                          is_active: rt.is_active,
+                        });
                         setShowRtDrawer(true);
-                      }}
-                    >
-                      {currentUser.role === 'admin' ? 'Sửa' : 'Xem'}
-                    </Button>
-                  </div>
-                </td>
-              </TableRow>
-            ))}
+                      }}>{currentUser.role === 'admin' ? 'Sửa' : 'Xem'}</Button>
+                      {currentUser.role === 'admin' && <>
+                        <Button variant="outline" size="sm" onClick={async () => {
+                          try {
+                            if (rt.is_active) await adminApi.hideRoomType(rt.id, currentUser.role);
+                            else await adminApi.updateRoomType(rt.id, { is_active: true }, currentUser.role);
+                            onShowToast(rt.is_active ? 'Đã ngừng bán loại phòng.' : 'Đã mở bán lại loại phòng.', 'success');
+                            await loadRoomTypes();
+                          } catch (err: any) { onShowToast(err?.response?.data?.message || 'Không thể cập nhật trạng thái loại phòng.', 'error'); }
+                        }}>{rt.is_active ? 'Ẩn' : 'Hiện'}</Button>
+                        <Button variant="outline" size="sm" onClick={async () => {
+                          if (!window.confirm(`Xóa loại phòng “${rt.name}”? Chỉ xóa được khi chưa có phòng hoặc đơn tham chiếu.`)) return;
+                          try {
+                            await adminApi.deleteRoomType(rt.id, currentUser.role);
+                            onShowToast('Đã xóa loại phòng.', 'success');
+                            await loadRoomTypes();
+                          } catch (err: any) { onShowToast(err?.response?.data?.message || 'Không thể xóa loại phòng.', 'error'); }
+                        }}>Xóa</Button>
+                      </>}
+                    </div>
+                  </td>
+                </TableRow>
+              ))
+            )}
           </tbody>
         </TableContainer>
       )}
 
       {/* ===== TAB 2: PHÒNG CỤ THỂ ===== */}
       {activeTab === 'rooms' && (
-        <>
-          {/* Legend trạng thái */}
-          <div className="flex flex-wrap gap-2 items-center px-1 text-[11px] text-[#78716C]">
-            <span className="font-medium">Trạng thái phòng:</span>
-            {Object.entries(ROOM_STATUS_CONFIG).map(([key, cfg]) => (
-              <span key={key} className="flex items-center gap-1">{cfg.badge}</span>
-            ))}
-            <span className="ml-1 italic">• Vòng lặp: Đang lưu trú → Cần dọn → Trống</span>
+        <div className="space-y-3">
+          {/* THANH BỘ LỌC NÂNG CAO VÀ LEGEND */}
+          <div className="p-3 bg-white border border-[#E5E0D8] rounded-[6px] space-y-2">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              {/* Legend 4 nhãn trạng thái tính toán */}
+              <div className="flex flex-wrap items-center gap-2 text-[11px] text-[#78716C]">
+                <span className="font-semibold text-[#1C1917]">Nhãn tính toán:</span>
+                <span className="flex items-center gap-1">🔴 Bảo trì</span>
+                <span>&gt;</span>
+                <span className="flex items-center gap-1">🔵 Đang lưu trú</span>
+                <span>&gt;</span>
+                <span className="flex items-center gap-1">🟡 Cần dọn dẹp</span>
+                <span>&gt;</span>
+                <span className="flex items-center gap-1">🟢 Sẵn sàng</span>
+              </div>
+
+              {/* THANH HÀNH ĐỘNG HÀNG LOẠT KHI TICK CHỌN */}
+              {currentUser.role === 'admin' && selectedRoomIds.length > 0 && (
+                <div className="flex items-center gap-2 bg-[#FDF7EE] border border-[#F7DCB4] px-2.5 py-1 rounded-[4px] animate-fade-in">
+                  <span className="text-xs font-semibold text-[#9C5B14]">
+                    Đã tick {selectedRoomIds.length} phòng:
+                  </span>
+
+                  <button
+                    type="button"
+                    onClick={() => setSelectedRoomIds([])}
+                    className="text-[#78716C] hover:text-[#1C1917] text-xs underline cursor-pointer ml-1"
+                  >
+                    Bỏ chọn
+                  </button>
+                </div>
+              )}
+            </div>
+
+            {/* Các dropdown bộ lọc */}
+            <div className="flex flex-wrap items-center gap-3 pt-2 border-t border-[#F0ECE1] text-xs">
+              <div className="flex items-center gap-1.5">
+                <span className="text-[#78716C] font-medium">Tầng:</span>
+                <select
+                  value={filterFloor}
+                  onChange={(e) => setFilterFloor(e.target.value)}
+                  className="bg-[#FAF9F7] border border-[#E5E0D8] rounded px-2 py-1 text-xs text-[#1C1917] focus:outline-none"
+                >
+                  <option value="all">Tất cả tầng</option>
+                  {availableFloors.map((fl) => (
+                    <option key={fl} value={String(fl)}>
+                      Tầng {fl}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+
+
+              {false && <div className="flex items-center gap-1.5">
+                <span className="text-[#78716C] font-medium">Đặc điểm:</span>
+                <select
+                  value={filterFeature}
+                  onChange={(e) => setFilterFeature(e.target.value)}
+                  className="bg-[#FAF9F7] border border-[#E5E0D8] rounded px-2 py-1 text-xs text-[#1C1917] focus:outline-none"
+                >
+                  <option value="all">Tất cả đặc điểm</option>
+                  {roomFeatures.map((f) => (
+                    <option key={f.id} value={String(f.id)}>
+                      {f.name}{Number(f.extra_price_per_night||0)>0?` (+${Number(f.extra_price_per_night).toLocaleString('vi-VN')}đ/đêm)`:''}
+                    </option>
+                  ))}
+                </select>
+              </div>}
+
+              <div className="flex items-center gap-1.5">
+                <span className="text-[#78716C] font-medium">Trạng thái:</span>
+                <select
+                  value={filterStatus}
+                  onChange={(e) => setFilterStatus(e.target.value)}
+                  className="bg-[#FAF9F7] border border-[#E5E0D8] rounded px-2 py-1 text-xs text-[#1C1917] focus:outline-none"
+                >
+                  <option value="all">Tất cả trạng thái</option>
+                  <option value="Sẵn sàng">🟢 Sẵn sàng</option>
+                  <option value="Đang lưu trú">🔵 Đang lưu trú</option>
+                  <option value="Cần dọn dẹp">🟡 Cần dọn dẹp</option>
+                  <option value="Bảo trì">🔴 Bảo trì</option>
+                </select>
+              </div>
+
+              {(filterFloor !== 'all' || filterFeature !== 'all' || filterStatus !== 'all') && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setFilterFloor('all');
+                    setFilterFeature('all');
+                    setFilterStatus('all');
+                  }}
+                  className="text-[#B4532A] hover:underline cursor-pointer font-medium ml-auto"
+                >
+                  Xóa bộ lọc
+                </button>
+              )}
+            </div>
           </div>
 
+          {/* BẢNG PHÒNG */}
           <TableContainer>
             <TableHeader>
               <tr>
-                <th className="py-3 px-3.5">Số phòng</th>
-                <th className="py-3 px-3.5">Loại phòng</th>
-                <th className="py-3 px-3.5">Chi nhánh</th>
-                <th className="py-3 px-3.5 text-center">Trạng thái</th>
-                <th className="py-3 px-3.5">Khóa TTLock</th>
-                <th className="py-3 px-3.5 text-center">Pin</th>
-                <th className="py-3 px-3.5 text-right">Hành động</th>
+                {currentUser.role === 'admin' && (
+                  <th className="py-3 px-3 text-center w-8">
+                    <input
+                      type="checkbox"
+                      checked={
+                        filteredRooms.length > 0 &&
+                        selectedRoomIds.length === filteredRooms.length
+                      }
+                      onChange={(e) => handleToggleSelectAll(e.target.checked)}
+                      className="accent-[#B4532A] cursor-pointer"
+                    />
+                  </th>
+                )}
+                <th className="py-3 px-3">Số phòng</th>
+                <th className="py-3 px-2 text-center">Tầng</th>
+
+                <th className="py-3 px-3">Loại phòng</th>
+                <th className="py-3 px-3">Biến thể</th>
+                <th className="py-3 px-3 text-center">Trạng thái tính toán</th>
+                <th className="py-3 px-3">Khóa TTLock</th>
+                <th className="py-3 px-3 text-center">Pin</th>
+                <th className="py-3 px-3 text-right">Thao tác</th>
               </tr>
             </TableHeader>
             <tbody>
               {roomsLoading ? (
-                <tr><td colSpan={7} className="py-10 text-center text-xs text-[#78716C]">Đang tải...</td></tr>
+                <tr>
+                  <td colSpan={currentUser.role === 'admin' ? 9 : 7} className="py-10 text-center text-xs text-[#78716C]">
+                    Đang tải danh sách phòng...
+                  </td>
+                </tr>
               ) : filteredRooms.length === 0 ? (
-                <tr><td colSpan={7} className="py-10 text-center text-xs text-[#78716C]">Không có phòng nào phù hợp với chi nhánh đã chọn.</td></tr>
-              ) : filteredRooms.map((r) => {
-                const statusCfg = ROOM_STATUS_CONFIG[r.status as RoomStatus] || ROOM_STATUS_CONFIG.available;
-                const isBlocked = showBlockedTooltip === r.room_id;
+                <tr>
+                  <td colSpan={currentUser.role === 'admin' ? 9 : 7} className="py-10 text-center text-xs text-[#78716C]">
+                    Không có phòng nào phù hợp với bộ lọc hiện tại.
+                  </td>
+                </tr>
+              ) : (
+                filteredRooms.map((r) => {
+                  const isChecked = selectedRoomIds.includes(r.room_id);
+                  const displayStatus =
+                    r.display_status ||
+                    computeRoomDisplayStatus({ housekeeping: r.housekeeping }, [], false);
+                  const floorNum = r.floor ?? suggestFloor(r.room_number) ?? 0;
 
-                return (
-                  <TableRow key={r.room_id} className={r.is_hidden ? 'opacity-50' : ''}>
-                    <td className="py-2.5 px-3.5 font-mono text-sm font-bold text-[#1C1917]">
-                      <div>{r.room_number} {r.is_hidden && <span className="ml-1 text-[10px] text-[#78716C] font-normal font-sans">(ẩn)</span>}</div>
-                      {r.special_features && (
-                        <div className="font-sans text-[11px] font-normal text-[#9C5B14] bg-[#FDF7EE] border border-[#F7DCB4] rounded px-1.5 py-0.5 mt-1 inline-block max-w-[220px] truncate" title={r.special_features}>
-                          ✦ {r.special_features}
-                        </div>
+                  return (
+                    <TableRow
+                      key={r.room_id}
+                      className={`${r.is_hidden ? 'opacity-50' : ''} ${
+                        isChecked ? 'bg-[#FDF7EE]' : ''
+                      }`}
+                    >
+                      {currentUser.role === 'admin' && (
+                        <td className="py-2.5 px-3 text-center">
+                          <input
+                            type="checkbox"
+                            checked={isChecked}
+                            onChange={() => handleToggleSelectRoom(r.room_id)}
+                            className="accent-[#B4532A] cursor-pointer"
+                          />
+                        </td>
                       )}
-                    </td>
-                    <td className="py-2.5 px-3.5 text-xs text-[#44403C]">{r.room_type_name}</td>
-                    <td className="py-2.5 px-3.5 text-xs text-[#78716C]">{r.apartment_name}</td>
-                    <td className="py-2.5 px-3.5 text-center">
-                      {statusCfg.badge}
-                    </td>
-                    <td className="py-2.5 px-3.5 text-xs">
-                      {r.lock_id ? (
-                        <>
-                          <div className="flex items-center gap-1.5 font-medium">
-                            {r.lock_status === 'online' ? (
-                              <><IconWifi className="w-3.5 h-3.5 text-[#2A694E]" /><span className="text-[#2A694E]">Trực tuyến</span></>
-                            ) : (
-                              <><IconWifiOff className="w-3.5 h-3.5 text-[#DC2626]" /><span className="text-[#DC2626]">Mất kết nối</span></>
-                            )}
-                          </div>
-                          <div className="text-[10px] text-[#78716C]">{r.lock_name}</div>
-                        </>
-                      ) : (
-                        <span className="text-[#78716C] italic">Chưa gán khóa</span>
-                      )}
-                    </td>
-                    <td className="py-2.5 px-3.5 text-center font-mono text-xs">
-                      {r.battery_level !== undefined ? (
-                        <div className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded ${
-                          r.battery_level < 20 ? 'bg-[#FDF2F2] text-[#DC2626] font-bold animate-pulse' : 'text-[#44403C]'
-                        }`}>
-                          <IconBattery className="w-3.5 h-3.5" level={r.battery_level} />
-                          {r.battery_level}%
+                      <td className="py-2.5 px-3 font-mono text-sm font-bold text-[#1C1917]">
+                        <div className="flex items-center gap-1.5">
+                          <span>{r.room_number}</span>
+                          {!r.lock_id && (
+                            <Badge variant="warning" size="sm">
+                              Chưa gắn khóa
+                            </Badge>
+                          )}
+                          {r.is_hidden && (
+                            <span className="text-[10px] text-[#78716C] font-normal font-sans">
+                              (ẩn)
+                            </span>
+                          )}
                         </div>
-                      ) : <span className="text-[#78716C]">—</span>}
-                    </td>
-                    <td className="py-2.5 px-3.5 text-right">
-                      <div className="flex items-center justify-end gap-1.5 relative">
-                        {/* Nút chuyển trạng thái vòng lặp (không phải maintenance) */}
-                        {r.status !== 'maintenance' && (
-                          <div className="relative">
-                            <Button
-                              variant={statusCfg.canManual ? 'secondary' : 'outline'}
-                              size="sm"
-                              onClick={() => handleStatusCycleClick(r)}
-                              className={!statusCfg.canManual ? 'opacity-50 cursor-not-allowed' : ''}
-                            >
-                              → {statusCfg.nextLabel}
-                            </Button>
-                            {/* Tooltip khi bị khóa */}
-                            {isBlocked && statusCfg.blockedReason && (
-                              <div className="absolute bottom-full right-0 mb-1.5 w-56 bg-[#1C1917] text-white text-[10px] rounded-[4px] px-2.5 py-1.5 z-50 shadow-lg">
-                                🔒 {statusCfg.blockedReason}
-                                <div className="absolute bottom-[-4px] right-3 w-2 h-2 bg-[#1C1917] rotate-45"></div>
-                              </div>
-                            )}
-                          </div>
-                        )}
-
-                        {/* Nút Bảo trì (available ↔ maintenance) */}
-                        {(r.status === 'available' || r.status === 'maintenance') && (
-                          <Button
-                            variant={r.status === 'maintenance' ? 'primary' : 'outline'}
-                            size="sm"
-                            onClick={() => handleToggleMaintenance(r)}
+                        {r.note && currentUser.role === 'admin' && (
+                          <div
+                            className="font-sans text-[10px] text-[#78716C] italic mt-0.5 max-w-[200px] truncate"
+                            title={r.note}
                           >
-                            {r.status === 'maintenance' ? 'Bỏ bảo trì' : 'Bảo trì'}
-                          </Button>
+                            📝 {r.note}
+                          </div>
                         )}
+                      </td>
+                      <td className="py-2.5 px-2 text-center font-mono font-bold text-xs text-[#44403C]">
+                        {floorNum}
+                      </td>
 
-                        {currentUser.role === 'admin' && (
-                          <>
-                            <Button
-                              variant="outline" size="sm" icon={<IconEdit className="w-3.5 h-3.5" />}
-                              onClick={() => {
-                                setIsNewRoom(false);
-                                setRoomForm({
-                                  id: r.room_id,
-                                  apartment_id: r.apartment_id,
-                                  room_type_id: r.room_type_id,
-                                  room_number: r.room_number,
-                                  status: r.status as RoomStatus,
-                                  special_features: r.special_features || '',
-                                });
-                                setShowRoomDrawer(true);
-                              }}
-                            >
-                              Sửa
-                            </Button>
-                            <Button
-                              variant="secondary" size="sm"
-                              icon={r.is_hidden ? <IconEye className="w-3.5 h-3.5" /> : <IconEyeOff className="w-3.5 h-3.5" />}
-                              onClick={() => handleHideRoom(r)}
-                            >
-                              {r.is_hidden ? 'Hiện' : 'Ẩn'}
-                            </Button>
-                          </>
+                      <td className="py-2.5 px-3 text-xs text-[#1C1917] font-medium">
+                        {r.room_type_name}
+                      </td>
+                      <td className="py-2.5 px-3 text-xs">
+                        <div className="flex flex-wrap gap-1 max-w-[220px]">
+                          <span className="text-[11px] text-[#9C5B14]">{r.variant_name || 'Tiêu chuẩn'}</span>
+                        </div>
+                      </td>
+                      <td className="py-2.5 px-3 text-center">
+                        {renderDisplayStatusBadge(displayStatus)}
+                        {r.housekeeping && (
+                          <div className="text-[10px] text-[#78716C] mt-0.5 font-sans">
+                            {r.housekeeping === 'clean' ? '🧼 Đã dọn sạch' : '🧹 Cần dọn phòng'}
+                          </div>
                         )}
-                      </div>
-                    </td>
-                  </TableRow>
-                );
-              })}
+                      </td>
+                      <td className="py-2.5 px-3 text-xs">
+                        {r.lock_id ? (
+                          <>
+                            <div className="flex items-center gap-1 font-medium">
+                              {r.lock_status === 'online' ? (
+                                <>
+                                  <IconWifi className="w-3.5 h-3.5 text-[#2A694E]" />
+                                  <span className="text-[#2A694E]">Trực tuyến</span>
+                                </>
+                              ) : (
+                                <>
+                                  <IconWifiOff className="w-3.5 h-3.5 text-[#DC2626]" />
+                                  <span className="text-[#DC2626]">Mất kết nối</span>
+                                </>
+                              )}
+                            </div>
+                            <div className="text-[10px] text-[#78716C] truncate max-w-[120px]">
+                              {r.lock_name}
+                            </div>
+                          </>
+                        ) : (
+                          <span className="text-[#78716C] italic">Chưa gán khóa</span>
+                        )}
+                      </td>
+                      <td className="py-2.5 px-3 text-center font-mono text-xs">
+                        {r.battery_level !== undefined ? (
+                          <div
+                            className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded ${
+                              r.battery_level < 20
+                                ? 'bg-[#FDF2F2] text-[#DC2626] font-bold animate-pulse'
+                                : 'text-[#44403C]'
+                            }`}
+                          >
+                            <IconBattery className="w-3.5 h-3.5" level={r.battery_level} />
+                            {r.battery_level}%
+                          </div>
+                        ) : (
+                          <span className="text-[#78716C]">—</span>
+                        )}
+                      </td>
+                      <td className="py-2.5 px-3 text-right">
+                        <div className="flex items-center justify-end gap-1.5">
+                          {/* Nút đổi dọn dẹp housekeeping: Cả Admin và Manager đều bấm được */}
+                          <button
+                            type="button"
+                            onClick={() => handleToggleHousekeeping(r)}
+                            title={r.housekeeping === 'clean' ? 'Đổi sang Cần dọn dẹp' : 'Đánh dấu Đã dọn sạch'}
+                            className={`px-2 py-1 rounded text-[11px] font-medium border cursor-pointer transition-colors ${
+                              r.housekeeping === 'dirty'
+                                ? 'bg-[#FEF3C7] text-[#92400E] border-[#FCD34D] hover:bg-[#FDE68A]'
+                                : 'bg-[#FAF9F7] text-[#44403C] border-[#E5E0D8] hover:bg-[#F0ECE1]'
+                            }`}
+                          >
+                            {r.housekeeping === 'dirty' ? '🧹 Đã dọn xong' : 'Báo cần dọn'}
+                          </button>
+
+                          {/* Nút đặt bảo trì: Mở Modal quản lý bảo trì */}
+                          {currentUser.role === 'admin' && (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => setBlockModalTarget(r)}
+                            >
+                              Bảo trì
+                            </Button>
+                          )}
+
+                          {/* Các nút chỉnh sửa / ẩn / xóa chỉ dành cho Admin */}
+                          {currentUser.role === 'admin' && (
+                            <>
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                icon={<IconEdit className="w-3.5 h-3.5" />}
+                                onClick={() => {
+                                  setIsNewRoom(false);
+                                  setRoomForm({
+                                    id: r.room_id,
+                                    apartment_id: r.apartment_id,
+                                    room_type_id: r.room_type_id,
+                                    room_type_parent_id: roomTypes.find(parent => (parent.variants || []).some(variant => variant.id === r.room_type_id))?.id || 0,
+                                    room_number: r.room_number,
+                                    floor: r.floor ?? suggestFloor(r.room_number) ?? 1,
+                                    note: r.note || '',
+                                    status: (r.status as any) || 'available',
+                                    initial_block_reason: '',
+                                    feature_ids: r.feature_ids || [],
+                                    special_features: r.special_features || '',
+                                  });
+                                  setShowRoomDrawer(true);
+                                }}
+                              >
+                                Sửa
+                              </Button>
+                              <Button
+                                variant="secondary"
+                                size="sm"
+                                icon={
+                                  r.is_hidden ? (
+                                    <IconEye className="w-3.5 h-3.5" />
+                                  ) : (
+                                    <IconEyeOff className="w-3.5 h-3.5" />
+                                  )
+                                }
+                                onClick={() => handleHideRoom(r)}
+                              >
+                                {r.is_hidden ? 'Hiện' : 'Ẩn'}
+                              </Button>
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => handleDeleteRoom(r)}
+                                className="text-[#DC2626] border-[#FCA5A5] hover:bg-[#FDF2F2]"
+                              >
+                                Xóa
+                              </Button>
+                            </>
+                          )}
+                        </div>
+                      </td>
+                    </TableRow>
+                  );
+                })
+              )}
             </tbody>
           </TableContainer>
-        </>
+        </div>
       )}
 
       {/* ===== DRAWER: LOẠI PHÒNG ===== */}
       <Drawer
         isOpen={showRtDrawer}
-        onClose={() => setShowRtDrawer(false)}
-        title={isNewRt ? 'Thêm loại phòng mới' : (currentUser.role === 'admin' ? 'Chỉnh sửa loại phòng' : 'Chi tiết loại phòng (Chỉ xem)')}
-        badge={currentUser.role === 'manager' ? <Badge variant="warning" size="sm">Chỉ xem</Badge> : undefined}
-        footer={
-          currentUser.role === 'admin' ? (
-            <div className="flex justify-end gap-2 w-full">
-              <Button variant="secondary" size="md" onClick={() => setShowRtDrawer(false)} disabled={rtSaving}>Hủy</Button>
-              <Button variant="primary" size="md" onClick={handleSaveRoomType} disabled={rtSaving}>
-                {rtSaving ? 'Đang lưu...' : 'Lưu loại phòng'}
-              </Button>
-            </div>
-          ) : (
-            <Button variant="outline" size="md" onClick={() => setShowRtDrawer(false)}>Đóng</Button>
-          )
-        }
-      >
-        <div className="space-y-4 text-xs">
-          {currentUser.role === 'manager' && (
-            <div className="p-2.5 bg-[#FDF7EE] border border-[#F7DCB4] rounded-[6px] text-[#9C5B14]">
-              Tài khoản Quản lý chỉ được xem thông tin, không được sửa.
-            </div>
-          )}
-          {isNewRt && (
-            <div>
-              <label className="block text-xs font-medium text-[#44403C] mb-1">Chi nhánh *</label>
-              <select
-                className="w-full border border-[#E5E0D8] rounded-[6px] px-3 py-2 text-xs text-[#1C1917] bg-white focus:outline-none focus:ring-1 focus:ring-[#B4532A]"
-                value={rtForm.apartment_id}
-                onChange={(e) => setRtForm({ ...rtForm, apartment_id: Number(e.target.value) })}
-                disabled={currentUser.role === 'manager'}
-              >
-                <option value={0}>-- Chọn chi nhánh --</option>
-                {branches.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
-              </select>
-            </div>
-          )}
-          <Input label="Tên loại phòng *" value={rtForm.name} disabled={currentUser.role === 'manager'}
-            onChange={(e) => setRtForm({ ...rtForm, name: e.target.value })} />
-          <div className="grid grid-cols-2 gap-3">
-            <Input label="Sức chứa tối đa (suất >15t)" type="number" value={rtForm.max_occupancy}
-              disabled={currentUser.role === 'manager'}
-              onChange={(e) => setRtForm({ ...rtForm, max_occupancy: Number(e.target.value) })} />
-            <Input label="Cấu hình giường" value={rtForm.bed_config}
-              disabled={currentUser.role === 'manager'}
-              onChange={(e) => setRtForm({ ...rtForm, bed_config: e.target.value })} />
+        onClose={() => { setShowRtDrawer(false); setVariantEditor(null); }}
+        title={isNewRt ? 'Thêm loại phòng' : currentUser.role === 'admin' ? 'Chỉnh sửa loại phòng' : 'Chi tiết loại phòng'}
+        footer={currentUser.role === 'admin' ? (
+          <div className="flex justify-end gap-2 w-full">
+            <Button variant="secondary" size="md" onClick={() => { setShowRtDrawer(false); setVariantEditor(null); }} disabled={rtSaving}>Đóng</Button>
+            <Button variant="primary" size="md" onClick={handleSaveRoomType} disabled={rtSaving}>{rtSaving ? 'Đang lưu…' : isNewRt ? 'Tạo loại phòng' : 'Lưu loại phòng'}</Button>
           </div>
+        ) : <Button variant="outline" size="md" onClick={() => setShowRtDrawer(false)}>Đóng</Button>}
+      >
+        <div className="space-y-5 text-xs">
+          {isNewRt && <div>
+            <label className="block text-xs font-medium text-[#44403C] mb-1">Chi nhánh *</label>
+            <select className="w-full border border-[#E5E0D8] rounded-[6px] px-3 py-2 text-xs bg-white" value={rtForm.apartment_id} onChange={e => setRtForm({ ...rtForm, apartment_id: Number(e.target.value) })} disabled={currentUser.role === 'manager'}>
+              <option value={0}>-- Chọn chi nhánh --</option>{branches.map(branch => <option key={branch.id} value={branch.id}>{branch.name}</option>)}
+            </select>
+          </div>}
+          <Input label="Tên loại phòng *" value={rtForm.name} disabled={currentUser.role === 'manager'} onChange={e => setRtForm({ ...rtForm, name: e.target.value })} />
           <div className="grid grid-cols-2 gap-3">
-            <Input label="Giá cơ bản / đêm (đ)" type="number" value={rtForm.base_price}
-              disabled={currentUser.role === 'manager'}
-              onChange={(e) => setRtForm({ ...rtForm, base_price: Number(e.target.value) })} />
-            <Input label="Diện tích (m²)" type="number" value={rtForm.area}
-              disabled={currentUser.role === 'manager'}
-              onChange={(e) => setRtForm({ ...rtForm, area: Number(e.target.value) })} />
+            <Input label="Sức chứa tối đa (>15 tuổi)" type="number" min={1} value={rtForm.max_occupancy} disabled={currentUser.role === 'manager'} onChange={e => setRtForm({ ...rtForm, max_occupancy: Number(e.target.value) })} />
+            <Input label="Cấu hình giường" value={rtForm.bed_config} disabled={currentUser.role === 'manager'} onChange={e => setRtForm({ ...rtForm, bed_config: e.target.value })} />
           </div>
           <div>
-            <label className="block text-xs font-medium text-[#44403C] mb-1">Mô tả ngắn</label>
-            <textarea
-              className="w-full border border-[#E5E0D8] rounded-[6px] px-3 py-2 text-xs text-[#1C1917] bg-white focus:outline-none focus:ring-1 focus:ring-[#B4532A] resize-none"
-              rows={3}
-              value={rtForm.description}
-              disabled={currentUser.role === 'manager'}
-              onChange={(e) => setRtForm({ ...rtForm, description: e.target.value })}
-            />
+            <label className="block text-xs font-medium text-[#44403C] mb-1">Mô tả phòng</label>
+            <textarea className="w-full border border-[#E5E0D8] rounded-[6px] px-3 py-2 text-xs bg-white resize-y" rows={3} value={rtForm.description} disabled={currentUser.role === 'manager'} onChange={e => setRtForm({ ...rtForm, description: e.target.value })} />
           </div>
+          <section className="space-y-3 border border-[#E5E0D8] rounded-xl p-4">
+            <div><h3 className="font-semibold text-sm">Ảnh loại phòng</h3><p className="text-[11px] text-[#78716C] mt-1">Thêm URL ảnh, xem trước, chỉnh URL hoặc xóa ảnh.</p></div>
+            {rtForm.image_urls.map((url, index) => <div key={`${index}-${url}`} className="flex gap-3 items-start border rounded-lg p-2">
+              <div className="w-20 h-16 rounded overflow-hidden bg-[#F4F2EE] shrink-0">{url && <img src={url} alt={`Ảnh ${index + 1}`} className="w-full h-full object-cover" />}</div>
+              <input type="url" value={url} disabled={currentUser.role === 'manager'} onChange={e => setRtForm(current => ({ ...current, image_urls: current.image_urls.map((image, i) => i === index ? e.target.value : image) }))} className="min-w-0 flex-1 border rounded px-2 py-2" placeholder="https://..." />
+              {currentUser.role === 'admin' && <Button variant="outline" size="sm" onClick={() => setRtForm(current => ({ ...current, image_urls: current.image_urls.filter((_, i) => i !== index) }))}>Xóa</Button>}
+            </div>)}
+            {currentUser.role === 'admin' && <div className="flex gap-2"><input type="url" value={newImageUrl} onChange={e => setNewImageUrl(e.target.value)} placeholder="Dán URL ảnh mới" className="min-w-0 flex-1 border rounded px-3 py-2" /><Button variant="outline" size="sm" disabled={!newImageUrl.trim()} onClick={() => { setRtForm(current => ({ ...current, image_urls: [...current.image_urls, newImageUrl.trim()] })); setNewImageUrl(''); }}>Thêm ảnh</Button></div>}
+          </section>
+          <section className="space-y-3 border border-[#E5E0D8] rounded-xl p-4">
+            <div><h3 className="font-semibold text-sm">Tiện ích</h3><p className="text-[11px] text-[#78716C] mt-1">Tiện ích được gắn ở loại phòng cha và dùng chung cho mọi biến thể.</p></div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">{amenityCatalog.map(amenity => <label key={amenity.id} className="flex items-center gap-2 text-xs"><input type="checkbox" checked={rtForm.amenity_ids.includes(amenity.id)} disabled={currentUser.role !== 'admin'} onChange={e => setRtForm(current => ({ ...current, amenity_ids: e.target.checked ? [...current.amenity_ids, amenity.id] : current.amenity_ids.filter(id => id !== amenity.id) }))} />{amenity.name}</label>)}</div>
+            {!amenityCatalog.length && <p className="text-[11px] text-[#78716C]">Danh mục tiện ích chưa có dữ liệu.</p>}
+            {currentUser.role === 'admin' && <div className="flex flex-wrap gap-2 pt-2 border-t"><input value={newAmenityName} onChange={e => setNewAmenityName(e.target.value)} placeholder="Tên tiện ích mới" className="border rounded px-2 py-1 text-xs flex-1 min-w-32" /><input value={newAmenityCategory} onChange={e => setNewAmenityCategory(e.target.value)} placeholder="Nhóm" className="border rounded px-2 py-1 text-xs w-28" /><Button size="sm" variant="outline" onClick={addAmenity} disabled={savingAmenity}>{savingAmenity ? 'Đang thêm…' : 'Thêm tiện ích'}</Button></div>}
+          </section>
+          {!isNewRt && rtForm.id && <section className="space-y-3 border border-[#E5E0D8] rounded-xl p-4">
+            <div className="flex items-center justify-between gap-3"><div><h3 className="font-semibold text-sm">Biến thể</h3><p className="text-[11px] text-[#78716C] mt-1">Mỗi biến thể có tên và giá riêng; tiện ích kế thừa từ loại phòng này.</p></div>{currentUser.role === 'admin' && <Button variant="primary" size="sm" icon={<IconPlus className="w-4 h-4" />} onClick={() => setVariantEditor({ name: '', price: '' })}>Thêm biến thể mới</Button>}</div>
+            {(roomTypes.find(type => type.id === rtForm.id)?.variants || []).map(variant => <div key={variant.id} className="flex items-center justify-between gap-3 border rounded-lg p-3">
+              <div><strong>{variant.name}</strong><div className="text-[11px] text-[#78716C] mt-1">{formatMoney(variant.base_price)}/đêm · {variant.total_rooms} phòng · {variant.is_active ? 'Đang bán' : 'Ngừng bán'}</div></div>
+              {currentUser.role === 'admin' && <Button variant="outline" size="sm" onClick={() => setVariantEditor({ id: variant.id, name: variant.name, price: String(variant.base_price) })}>Sửa</Button>}
+            </div>)}
+            {!(roomTypes.find(type => type.id === rtForm.id)?.variants || []).length && <p className="text-xs text-[#78716C] border rounded-lg p-3">Loại phòng chưa có biến thể. Hãy thêm biến thể để có thể gán phòng và nhận đặt phòng.</p>}
+            {variantEditor && <div className="space-y-3 bg-[#FAF8F5] border border-[#D9C6B8] rounded-xl p-4">
+              <div className="font-semibold text-sm">{variantEditor.id ? 'Sửa biến thể' : 'Thêm biến thể mới'}</div>
+              <Input label="Tên biến thể *" value={variantEditor.name} onChange={e => setVariantEditor(current => current ? { ...current, name: e.target.value } : current)} placeholder="Ví dụ: Tiêu chuẩn, View biển" />
+              <Input label="Giá mỗi đêm (đ) *" type="number" min={1} value={variantEditor.price} onChange={e => setVariantEditor(current => current ? { ...current, price: e.target.value } : current)} helperText="Giá của biến thể; tiện ích dùng chung với loại phòng cha." />
+              <div className="flex justify-end gap-2"><Button variant="secondary" size="sm" onClick={() => setVariantEditor(null)} disabled={rtSaving}>Hủy</Button><Button variant="primary" size="sm" onClick={saveRoomVariant} disabled={rtSaving}>{rtSaving ? 'Đang lưu…' : 'Lưu biến thể'}</Button></div>
+            </div>}
+          </section>}
         </div>
       </Drawer>
 
-      {/* ===== DRAWER: PHÒNG CỤ THỂ ===== */}
       <Drawer
         isOpen={showRoomDrawer}
         onClose={() => setShowRoomDrawer(false)}
-        title={isNewRoom ? 'Thêm phòng mới' : 'Chỉnh sửa phòng'}
-        footer={
-          <div className="flex justify-end gap-2 w-full">
-            <Button variant="secondary" size="md" onClick={() => setShowRoomDrawer(false)} disabled={roomSaving}>Hủy</Button>
-            <Button variant="primary" size="md" onClick={handleSaveRoom} disabled={roomSaving}>
-              {roomSaving ? 'Đang lưu...' : 'Lưu phòng'}
-            </Button>
-          </div>
-        }
+        title={isNewRoom ? 'Thêm phòng cụ thể' : 'Chỉnh sửa phòng'}
+        footer={<div className="flex justify-end gap-2 w-full"><Button variant="secondary" size="md" onClick={() => setShowRoomDrawer(false)} disabled={roomSaving}>Hủy</Button><Button variant="primary" size="md" onClick={handleSaveRoom} disabled={roomSaving}>{roomSaving ? 'Đang lưu…' : isNewRoom ? 'Tạo phòng' : 'Lưu phòng'}</Button></div>}
       >
         <div className="space-y-4 text-xs">
-          {isNewRoom && (
-            <div>
-              <label className="block text-xs font-medium text-[#44403C] mb-1">Chi nhánh *</label>
-              <select
-                className="w-full border border-[#E5E0D8] rounded-[6px] px-3 py-2 text-xs text-[#1C1917] bg-white focus:outline-none focus:ring-1 focus:ring-[#B4532A]"
-                value={roomForm.apartment_id}
-                onChange={(e) => setRoomForm({ ...roomForm, apartment_id: Number(e.target.value) })}
-              >
-                <option value={0}>-- Chọn chi nhánh --</option>
-                {branches.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
-              </select>
-            </div>
-          )}
-          <div>
+          {isNewRoom && <div>
+            <label className="block text-xs font-medium text-[#44403C] mb-1">Chi nhánh *</label>
+            <select className="w-full border border-[#E5E0D8] rounded-[6px] px-3 py-2 bg-white" value={roomForm.apartment_id} onChange={e => {
+              const apartmentId = Number(e.target.value);
+              const firstParent = selectableParents.find(parent => parent.apartment_id === apartmentId);
+              const firstVariant = firstParent?.variants?.find(variant => variant.is_active);
+              setRoomForm(current => ({ ...current, apartment_id: apartmentId, room_type_parent_id: firstParent?.id || 0, room_type_id: firstVariant?.id || 0 }));
+            }}>
+              <option value={0}>-- Chọn chi nhánh --</option>{branches.map(branch => <option key={branch.id} value={branch.id}>{branch.name}</option>)}
+            </select>
+          </div>}
+          {isNewRoom && <div>
             <label className="block text-xs font-medium text-[#44403C] mb-1">Loại phòng *</label>
-            <select
-              className="w-full border border-[#E5E0D8] rounded-[6px] px-3 py-2 text-xs text-[#1C1917] bg-white focus:outline-none focus:ring-1 focus:ring-[#B4532A]"
-              value={roomForm.room_type_id}
-              onChange={(e) => setRoomForm({ ...roomForm, room_type_id: Number(e.target.value) })}
-            >
+            <select className="w-full border border-[#E5E0D8] rounded-[6px] px-3 py-2 bg-white" value={roomForm.room_type_parent_id} onChange={e => {
+              const parentId = Number(e.target.value);
+              const parent = selectableParents.find(item => item.id === parentId);
+              const firstVariant = parent?.variants?.find(variant => variant.is_active);
+              setRoomForm(current => ({ ...current, room_type_parent_id: parentId, room_type_id: firstVariant?.id || 0 }));
+            }}>
               <option value={0}>-- Chọn loại phòng --</option>
-              {roomTypes
-                .filter((rt) => !roomForm.apartment_id || rt.apartment_id === roomForm.apartment_id)
-                .map((rt) => <option key={rt.id} value={rt.id}>{rt.name}</option>)}
+              {selectableParents.filter(parent => parent.apartment_id === roomForm.apartment_id).map(parent => <option key={parent.id} value={parent.id}>{parent.name}</option>)}
             </select>
-          </div>
-          <Input label="Số phòng (mã phòng) *" value={roomForm.room_number}
-            onChange={(e) => setRoomForm({ ...roomForm, room_number: e.target.value })}
-            placeholder="VD: P101, A202" />
+          </div>}
           <div>
+            <label className="block text-xs font-medium text-[#44403C] mb-1">Biến thể loại phòng *</label>
+            <select className="w-full border border-[#E5E0D8] rounded-[6px] px-3 py-2 bg-white" value={roomForm.room_type_id} onChange={e => setRoomForm(current => ({ ...current, room_type_id: Number(e.target.value) }))}>
+              <option value={0}>-- Chọn loại phòng và biến thể --</option>
+              {isNewRoom
+                ? selectedParentVariants.map(variant => <option key={variant.id} value={variant.id}>{variant.name} · {formatMoney(variant.base_price)}/đêm</option>)
+                : roomTypes.filter(parent => parent.is_active).map(parent => <optgroup key={parent.id} label={parent.name}>{(parent.variants || []).filter(variant => variant.is_active).map(variant => <option key={variant.id} value={variant.id}>{variant.name} · {formatMoney(variant.base_price)}/đêm</option>)}</optgroup>)}
+            </select>
+            {isNewRoom && <p className="mt-1 text-[10px] text-[#78716C]">Chỉ hiển thị biến thể đã khai báo cho loại phòng đang chọn.</p>}
+          </div>
+          {isNewRoom ? <div className="grid grid-cols-2 gap-3">
+            <Input label="Số lượng phòng *" type="number" min={1} max={100} value={roomForm.room_quantity} onChange={e => setRoomForm(current => ({ ...current, room_quantity: Number(e.target.value) }))} />
+            <Input label="Tầng *" type="number" min={0} value={roomForm.floor} onChange={e => setRoomForm(current => ({ ...current, floor: Number(e.target.value) }))} />
+            <div className="col-span-2 rounded-lg border border-[#E5E0D8] bg-[#FAF8F5] p-3">
+              <div className="font-semibold mb-1">Số phòng sẽ tự tạo</div>
+              <div className="text-[#78716C] break-words">{roomNumberPreview.length ? roomNumberPreview.map(group => <div key={group.floor}><strong>Tầng {group.floor}:</strong> {group.roomNumbers.join(', ')}</div>) : 'Chọn chi nhánh, loại phòng, tầng và số lượng để xem mã phòng.'}</div>
+              <p className="text-[10px] text-[#78716C] mt-1">M&#7895;i t&#7847;ng t&#7889;i &#273;a 20 ph&#242;ng; m&#227; m&#7899;i n&#7889;i ti&#7871;p s&#7889; l&#7899;n nh&#7845;t v&#224; ph&#7847;n c&#242;n l&#7841;i t&#7921; chuy&#7875;n sang t&#7847;ng k&#7871; ti&#7871;p.</p>
+            </div>
+          </div> : <div className="grid grid-cols-2 gap-3">
+            <Input label="Số phòng (mã phòng) *" value={roomForm.room_number} onChange={e => handleRoomNumberChange(e.target.value)} placeholder="Ví dụ: B103" />
+            <Input label="Tầng *" type="number" min={0} value={roomForm.floor} onChange={e => setRoomForm(current => ({ ...current, floor: Number(e.target.value) }))} />
+          </div>}
+          <div>
+            <label className="block text-xs font-medium text-[#44403C] mb-1">Ghi chú nội bộ</label>
+            <textarea className="w-full border border-[#E5E0D8] rounded-[6px] px-3 py-2 resize-y" rows={2} value={roomForm.note} onChange={e => setRoomForm(current => ({ ...current, note: e.target.value }))} placeholder="Ghi chú chỉ dành cho quản trị viên" />
+          </div>
+          {isNewRoom && <div>
             <label className="block text-xs font-medium text-[#44403C] mb-1">Trạng thái ban đầu</label>
-            <select
-              className="w-full border border-[#E5E0D8] rounded-[6px] px-3 py-2 text-xs text-[#1C1917] bg-white focus:outline-none focus:ring-1 focus:ring-[#B4532A]"
-              value={roomForm.status}
-              onChange={(e) => setRoomForm({ ...roomForm, status: e.target.value as RoomStatus })}
-            >
-              <option value="available">Trống (available)</option>
-              <option value="maintenance">Bảo trì (maintenance)</option>
+            <select className="w-full border border-[#E5E0D8] rounded-[6px] px-3 py-2 bg-white" value={roomForm.status} onChange={e => setRoomForm(current => ({ ...current, status: e.target.value as 'available' | 'maintenance' }))}>
+              <option value="available">Sẵn sàng</option><option value="maintenance">Bảo trì</option>
             </select>
-          </div>
-          <div>
-            <label className="block text-xs font-medium text-[#44403C] mb-1">
-              Đặc điểm đặc biệt của phòng <span className="text-[#78716C] font-normal">(không bắt buộc, không ảnh hưởng giá)</span>
-            </label>
-            <textarea
-              className="w-full border border-[#E5E0D8] rounded-[6px] px-3 py-2 text-xs text-[#1C1917] bg-white focus:outline-none focus:ring-1 focus:ring-[#B4532A] resize-none"
-              rows={3}
-              placeholder="VD: Hướng đón nắng sáng, View biển trực diện Bãi Dâu, Gần lối ra sân thượng, Bồn tắm ngâm thảo mộc..."
-              value={roomForm.special_features || ''}
-              onChange={(e) => setRoomForm({ ...roomForm, special_features: e.target.value })}
-            />
-            <p className="text-[10px] text-[#78716C] mt-1">Thông tin mô tả đặc trưng của phòng, lưu tự do và không làm thay đổi giá tiền.</p>
-          </div>
+            {roomForm.status === 'maintenance' && <Input label="Lý do bảo trì ban đầu *" value={roomForm.initial_block_reason} onChange={e => setRoomForm(current => ({ ...current, initial_block_reason: e.target.value }))} placeholder="Ví dụ: Đang sửa khóa cửa" />}
+          </div>}
         </div>
       </Drawer>
 
-      {/* ===== MODAL: TẠO NHIỀU PHÒNG THEO DẢI SỐ ===== */}
-      <Modal
-        isOpen={showBatchModal}
-        onClose={() => { if (!batchSaving) setShowBatchModal(false); }}
-        title="Tạo nhiều phòng theo dải số (Batch Create)"
-        maxWidth="2xl"
-        footer={
-          <div className="flex items-center justify-between w-full">
-            <div className="text-xs text-[#78716C]">
-              {batchRooms.length > 0 ? (
-                <span>
-                  Tổng cộng: <strong className="text-[#1C1917]">{batchRooms.length}</strong> phòng
-                  {batchRooms.some(r => r.isDuplicate) && (
-                    <span className="text-[#DC2626] font-medium ml-2">
-                      (Có phòng bị trùng số!)
-                    </span>
-                  )}
-                </span>
-              ) : (
-                <span>Chưa sinh danh sách phòng</span>
-              )}
-            </div>
-            <div className="flex gap-2">
-              <Button
-                variant="secondary"
-                size="md"
-                onClick={() => setShowBatchModal(false)}
-                disabled={batchSaving}
-              >
-                Hủy
-              </Button>
-              <Button
-                variant="primary"
-                size="md"
-                disabled={batchSaving || batchRooms.length === 0 || batchRooms.some(r => r.isDuplicate)}
-                onClick={handleSaveBatchRooms}
-              >
-                {batchSaving ? 'Đang tạo...' : `Xác nhận tạo ${batchRooms.length} phòng`}
-              </Button>
-            </div>
-          </div>
-        }
-      >
-        <div className="space-y-4 text-xs">
-          {/* PHẦN 1: THIẾT LẬP DẢI SỐ */}
-          <div className="p-3.5 bg-[#FAF8F5] border border-[#E5E0D8] rounded-[8px] space-y-3">
-            <div className="font-semibold text-[#1C1917] flex items-center justify-between">
-              <span className="text-[#B4532A]">1. Cấu hình chung & Quy tắc dải số</span>
-              <span className="text-[11px] text-[#78716C] font-normal">Tự động sinh mã phòng liên tục</span>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              <div>
-                <label className="block text-xs font-medium text-[#44403C] mb-1">Chi nhánh *</label>
-                <select
-                  className="w-full border border-[#E5E0D8] rounded-[6px] px-3 py-1.5 text-xs text-[#1C1917] bg-white focus:outline-none focus:ring-1 focus:ring-[#B4532A]"
-                  value={batchBranchId}
-                  onChange={(e) => {
-                    const newBranch = Number(e.target.value);
-                    setBatchBranchId(newBranch);
-                    const avTypes = roomTypes.filter(rt => rt.apartment_id === newBranch);
-                    setBatchRoomTypeId(avTypes[0]?.id || 0);
-                    setBatchRooms([]);
-                    updateSuggestedStartDigits(batchPrefix, newBranch);
-                  }}
-                >
-                  {branches.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-xs font-medium text-[#44403C] mb-1">Loại phòng *</label>
-                <select
-                  className="w-full border border-[#E5E0D8] rounded-[6px] px-3 py-1.5 text-xs text-[#1C1917] bg-white focus:outline-none focus:ring-1 focus:ring-[#B4532A]"
-                  value={batchRoomTypeId}
-                  onChange={(e) => {
-                    setBatchRoomTypeId(Number(e.target.value));
-                    setBatchRooms([]);
-                  }}
-                >
-                  <option value={0}>-- Chọn loại phòng --</option>
-                  {roomTypes
-                    .filter((rt) => !batchBranchId || rt.apartment_id === batchBranchId)
-                    .map((rt) => <option key={rt.id} value={rt.id}>{rt.name}</option>)}
-                </select>
-              </div>
-            </div>
-
-            {/* Dải số */}
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-2.5 pt-1">
-              <div>
-                <label className="block text-[11px] font-medium text-[#44403C] mb-1">Tiền tố (Prefix)</label>
-                <input
-                  type="text"
-                  placeholder="VD: P, A, Villa-"
-                  value={batchPrefix}
-                  onChange={(e) => {
-                    const newPrefix = e.target.value;
-                    setBatchPrefix(newPrefix);
-                    updateSuggestedStartDigits(newPrefix, batchBranchId);
-                  }}
-                  className="w-full border border-[#E5E0D8] rounded-[6px] px-2.5 py-1.5 text-xs text-[#1C1917] bg-white focus:outline-none focus:ring-1 focus:ring-[#B4532A]"
-                />
-              </div>
-
-              <div>
-                <label className="block text-[11px] font-medium text-[#44403C] mb-1">
-                  Số bắt đầu <span className="text-[#78716C] font-normal">(VD: 001, 101)</span> *
-                </label>
-                <input
-                  type="text"
-                  placeholder="VD: 001, 101"
-                  value={batchStartDigits}
-                  onChange={(e) => setBatchStartDigits(e.target.value)}
-                  className="w-full border border-[#E5E0D8] rounded-[6px] px-2.5 py-1.5 text-xs font-mono font-bold text-[#1C1917] bg-white focus:outline-none focus:ring-1 focus:ring-[#B4532A]"
-                />
-              </div>
-
-              <div>
-                <label className="block text-[11px] font-medium text-[#44403C] mb-1">Số lượng phòng *</label>
-                <input
-                  type="number"
-                  min={1}
-                  max={30}
-                  value={batchCount}
-                  onChange={(e) => setBatchCount(Number(e.target.value))}
-                  className="w-full border border-[#E5E0D8] rounded-[6px] px-2.5 py-1.5 text-xs text-[#1C1917] bg-white focus:outline-none focus:ring-1 focus:ring-[#B4532A]"
-                />
-              </div>
-
-              <div>
-                <label className="block text-[11px] font-medium text-[#44403C] mb-1">Trạng thái ban đầu</label>
-                <select
-                  value={batchDefaultStatus}
-                  onChange={(e) => setBatchDefaultStatus(e.target.value as 'available' | 'maintenance')}
-                  className="w-full border border-[#E5E0D8] rounded-[6px] px-2 py-1.5 text-xs text-[#1C1917] bg-white focus:outline-none focus:ring-1 focus:ring-[#B4532A]"
-                >
-                  <option value="available">Trống (available)</option>
-                  <option value="maintenance">Bảo trì (maintenance)</option>
-                </select>
-              </div>
-            </div>
-
-            {/* Thanh thông tin gợi ý số tiếp theo (+1) */}
-            <div className="text-[11px] px-3 py-2 bg-white border border-[#E5E0D8] rounded-[6px] flex flex-wrap items-center justify-between gap-1">
-              <div>
-                {latestDetectedRoom ? (
-                  <span>
-                    Phòng mới nhất hiện có của tiền tố <strong>{batchPrefix}</strong>: <span className="font-mono font-bold text-[#B4532A]">{latestDetectedRoom}</span>
-                    {' '}&rarr; Gợi ý số tiếp theo: <span className="font-mono font-bold text-[#2A694E]">{batchPrefix}{batchStartDigits}</span>
-                  </span>
-                ) : (
-                  <span>
-                    Chưa có phòng nào tiền tố <strong>{batchPrefix}</strong> tại chi nhánh này &rarr; Bắt đầu từ: <span className="font-mono font-bold text-[#2A694E]">{batchPrefix}{batchStartDigits}</span>
-                  </span>
-                )}
-              </div>
-              <div className="text-[#78716C] text-[10px]">
-                Quy tắc tầng: 10 phòng/tầng (01 &rarr; 10, phòng tiếp theo nhảy lên tầng mới)
-              </div>
-            </div>
-
-            {/* Checkbox kiêng số */}
-            <div className="flex flex-wrap items-center gap-4 pt-1 border-t border-[#E5E0D8]/60">
-              <label className="flex items-center gap-1.5 cursor-pointer text-[11px] text-[#44403C] select-none">
-                <input
-                  type="checkbox"
-                  checked={batchSkip4}
-                  onChange={(e) => {
-                    const checked = e.target.checked;
-                    setBatchSkip4(checked);
-                    updateSuggestedStartDigits(batchPrefix, batchBranchId, checked, batchSkip13);
-                  }}
-                  className="w-3.5 h-3.5 text-[#B4532A] rounded border-[#D6D0C7] focus:ring-[#B4532A]"
-                />
-                <span>Bỏ qua số chứa số <strong>4</strong> (VD: 004, 104, 204...)</span>
-              </label>
-
-              <label className="flex items-center gap-1.5 cursor-pointer text-[11px] text-[#44403C] select-none">
-                <input
-                  type="checkbox"
-                  checked={batchSkip13}
-                  onChange={(e) => {
-                    const checked = e.target.checked;
-                    setBatchSkip13(checked);
-                    updateSuggestedStartDigits(batchPrefix, batchBranchId, batchSkip4, checked);
-                  }}
-                  className="w-3.5 h-3.5 text-[#B4532A] rounded border-[#D6D0C7] focus:ring-[#B4532A]"
-                />
-                <span>Bỏ qua số <strong>13</strong> (VD: 113, 213...)</span>
-              </label>
-
-              <div className="ml-auto">
-                <Button
-                  variant="primary"
-                  size="sm"
-                  icon={<IconRefresh className="w-3.5 h-3.5" />}
-                  onClick={handleGenerateBatchRooms}
-                >
-                  Sinh danh sách phòng
-                </Button>
-              </div>
-            </div>
-          </div>
-
-          {/* PHẦN 2: BẢNG DANH SÁCH & ĐẶC ĐIỂM RIÊNG TỪNG PHÒNG */}
-          {batchRooms.length > 0 ? (
-            <div className="space-y-2">
-              <div className="flex items-center justify-between">
-                <div className="font-semibold text-[#1C1917] flex items-center gap-2">
-                  <span className="text-[#B4532A]">2. Danh sách phòng & Đặc điểm riêng từng phòng</span>
-                  <span className="text-[11px] font-normal text-[#78716C]">({batchRooms.length} phòng)</span>
-                </div>
-
-                {/* Điền mẫu nhanh cho các ô trống */}
-                <div className="flex items-center gap-1.5">
-                  <input
-                    type="text"
-                    placeholder="Đặc điểm chung mẫu..."
-                    value={quickFeatureText}
-                    onChange={(e) => setQuickFeatureText(e.target.value)}
-                    className="border border-[#E5E0D8] rounded-[4px] px-2 py-1 text-[11px] text-[#1C1917] bg-white w-44 focus:outline-none focus:ring-1 focus:ring-[#B4532A]"
-                  />
-                  <Button variant="outline" size="sm" onClick={handleApplyQuickFeatures}>
-                    Áp dụng ô trống
-                  </Button>
-                </div>
-              </div>
-
-              {/* Bảng editable */}
-              <div className="border border-[#E5E0D8] rounded-[8px] overflow-hidden max-h-72 overflow-y-auto">
-                <table className="w-full text-left border-collapse">
-                  <thead className="bg-[#FAF8F5] border-b border-[#E5E0D8] sticky top-0 z-10 text-[11px] text-[#78716C] font-semibold">
-                    <tr>
-                      <th className="py-2 px-2.5 w-12 text-center">STT</th>
-                      <th className="py-2 px-2.5 w-32">Số phòng</th>
-                      <th className="py-2 px-2.5 w-32">Trạng thái</th>
-                      <th className="py-2 px-2.5">Đặc điểm riêng biệt của phòng</th>
-                      <th className="py-2 px-2 w-10 text-center"></th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-[#F4F2EE] text-xs">
-                    {batchRooms.map((r, idx) => (
-                      <tr key={r.id} className={r.isDuplicate ? 'bg-[#FEF2F2]' : 'hover:bg-[#FAF8F5]'}>
-                        <td className="py-2 px-2.5 text-center font-mono text-[#78716C]">{idx + 1}</td>
-                        <td className="py-2 px-2.5">
-                          <input
-                            type="text"
-                            value={r.room_number}
-                            onChange={(e) => handleUpdateBatchRoom(r.id, 'room_number', e.target.value)}
-                            className={`w-full font-mono font-bold px-2 py-1 rounded-[4px] border text-xs focus:outline-none ${
-                              r.isDuplicate
-                                ? 'border-[#DC2626] bg-white text-[#DC2626] focus:ring-1 focus:ring-[#DC2626]'
-                                : 'border-[#E5E0D8] bg-white text-[#1C1917] focus:ring-1 focus:ring-[#B4532A]'
-                            }`}
-                          />
-                          {r.isDuplicate && (
-                            <div className="text-[10px] text-[#DC2626] mt-0.5 flex items-center gap-0.5">
-                              <IconAlertTriangle className="w-3 h-3 flex-shrink-0" />
-                              <span>Trùng số phòng!</span>
-                            </div>
-                          )}
-                        </td>
-                        <td className="py-2 px-2.5">
-                          <select
-                            value={r.status}
-                            onChange={(e) => handleUpdateBatchRoom(r.id, 'status', e.target.value)}
-                            className="w-full border border-[#E5E0D8] rounded-[4px] px-2 py-1 text-xs text-[#1C1917] bg-white focus:outline-none focus:ring-1 focus:ring-[#B4532A]"
-                          >
-                            <option value="available">Trống</option>
-                            <option value="maintenance">Bảo trì</option>
-                          </select>
-                        </td>
-                        <td className="py-2 px-2.5">
-                          <input
-                            type="text"
-                            placeholder="VD: Hướng nắng sáng, View biển, Bồn tắm..."
-                            value={r.special_features}
-                            onChange={(e) => handleUpdateBatchRoom(r.id, 'special_features', e.target.value)}
-                            className="w-full border border-[#E5E0D8] rounded-[4px] px-2.5 py-1 text-xs text-[#1C1917] bg-white focus:outline-none focus:ring-1 focus:ring-[#B4532A]"
-                          />
-                        </td>
-                        <td className="py-2 px-2 text-center">
-                          <button
-                            type="button"
-                            onClick={() => handleDeleteBatchRoom(r.id)}
-                            className="text-[#78716C] hover:text-[#DC2626] p-1 transition-colors"
-                            title="Xóa phòng này"
-                          >
-                            <IconX className="w-3.5 h-3.5" />
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-
-              {batchRooms.some(r => r.isDuplicate) && (
-                <div className="p-2.5 bg-[#FEF2F2] border border-[#FECACA] text-[#991B1B] rounded-[6px] text-[11px] flex items-center gap-2">
-                  <IconAlertTriangle className="w-4 h-4 flex-shrink-0" />
-                  <span>Một số phòng bị trùng với các phòng đã có sẵn trong chi nhánh. Hãy sửa lại số phòng hoặc bấm <strong>✕</strong> để xóa phòng đó trước khi lưu.</span>
-                </div>
-              )}
-            </div>
-          ) : (
-            <div className="p-8 border border-dashed border-[#E5E0D8] rounded-[8px] text-center text-[#78716C]">
-              <div className="text-sm font-medium text-[#44403C]">Chưa có phòng nào trong danh sách</div>
-              <div className="text-[11px] mt-1">Chọn chi nhánh, loại phòng và bấm <strong>"Sinh danh sách phòng"</strong> ở trên để tạo dải phòng tự động.</div>
-            </div>
-          )}
-        </div>
-      </Modal>
-
-      {/* ===== CONFIRM: VÒNG LẶP TRẠNG THÁI (occupied/cleaning/available) ===== */}
-      <ConfirmDialog
-        isOpen={showStatusConfirm}
-        onClose={() => { setShowStatusConfirm(false); setStatusTarget(null); setStatusTargetNext(null); }}
-        onConfirm={handleConfirmStatusChange}
-        title={`Chuyển trạng thái phòng ${statusTarget?.room_number || ''}`}
-        message={`Xác nhận chuyển phòng ${statusTarget?.room_number} từ "${ROOM_STATUS_CONFIG[statusTarget?.status as RoomStatus]?.label || ''}" sang "${ROOM_STATUS_CONFIG[statusTargetNext as RoomStatus]?.label || ''}"?`}
-        confirmLabel={`Chuyển sang ${ROOM_STATUS_CONFIG[statusTargetNext as RoomStatus]?.label || ''}`}
-        variant="primary"
-        reasonRequired={false}
-        reasonValue={statusReason}
-        onReasonChange={setStatusReason}
+      <RoomBlockModal
+        isOpen={Boolean(blockModalTarget)}
+        onClose={() => setBlockModalTarget(null)}
+        room={blockModalTarget}
+        currentUserRole={currentUser.role}
+        onSuccess={() => loadRooms()}
+        onShowToast={onShowToast}
       />
 
-      {/* ===== CONFIRM: BẢO TRÌ ===== */}
-      <ConfirmDialog
-        isOpen={showMaintenanceConfirm}
-        onClose={() => { setShowMaintenanceConfirm(false); setMaintenanceTarget(null); }}
-        onConfirm={handleConfirmMaintenance}
-        title={maintenanceTarget?.status === 'maintenance' ? 'Bỏ bảo trì phòng' : 'Chuyển sang bảo trì'}
-        message={`Bạn có chắc muốn chuyển phòng ${maintenanceTarget?.room_number} sang "${maintenanceTarget?.status === 'maintenance' ? 'Trống' : 'Bảo trì'}"?${maintenanceTarget?.status !== 'maintenance' ? ' Hệ thống sẽ tự động gán lại nếu có booking trùng lịch.' : ''}`}
-        confirmLabel={maintenanceTarget?.status === 'maintenance' ? 'Bỏ bảo trì' : 'Chuyển bảo trì'}
-        variant={maintenanceTarget?.status === 'maintenance' ? 'primary' : 'danger'}
-        reasonRequired={maintenanceTarget?.status !== 'maintenance'}
-        reasonValue={maintenanceReason}
-        onReasonChange={setMaintenanceReason}
+      {/* ===== MODAL: CÀI ĐẶT NHÓM PHÒNG & ĐẶC ĐIỂM (ADMIN) ===== */}
+      <ManageGroupsFeaturesModal
+        isOpen={showManageModal}
+        onClose={() => setShowManageModal(false)}
+        currentUserRole={currentUser.role}
+        roomGroups={[]}
+        roomFeatures={roomFeatures}
+        onRefreshData={() => {
+          loadGroupsAndFeatures();
+          loadRooms();
+        }}
+        onShowToast={onShowToast}
       />
+
+      {/* ===== MODAL: GÁN HÀNG LOẠT (BULK ASSIGN) ===== */}
     </div>
   );
 };

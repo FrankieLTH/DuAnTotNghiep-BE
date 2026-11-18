@@ -92,7 +92,7 @@ export class LocksService {
   }
 
   async selfCheckIn(data: { booking_id: number; guests_list: any[] }) {
-    const booking = await this.bookingRepository.findOne({ where: { id: data.booking_id } });
+    const booking = await this.bookingRepository.findOne({ where: { id: data.booking_id }, relations: ['booking_rooms'] });
     if (!booking) {
       throw new NotFoundException('Không tìm thấy đơn đặt phòng');
     }
@@ -102,8 +102,7 @@ export class LocksService {
     booking.booking_status = 'checked_in' as any;
     await this.bookingRepository.save(booking);
 
-    // Cập nhật trạng thái phòng sang occupied
-    await this.roomRepository.update(booking.room_id, { status: 'available' as any });
+    await this.updateBookingRooms(booking, 'occupied');
 
     return {
       message: 'Khai báo check-in thành công. Bạn có thể sử dụng mã PIN để mở cửa phòng.',
@@ -113,7 +112,7 @@ export class LocksService {
   }
 
   async earlyCheckOut(bookingId: number) {
-    const booking = await this.bookingRepository.findOne({ where: { id: bookingId } });
+    const booking = await this.bookingRepository.findOne({ where: { id: bookingId }, relations: ['booking_rooms'] });
     if (!booking) {
       throw new NotFoundException('Không tìm thấy đơn đặt phòng');
     }
@@ -125,14 +124,20 @@ export class LocksService {
     // Vô hiệu mã PIN ngay lập tức
     await this.lockPinRepository.update({ booking_id: bookingId }, { status: 'revoked' });
 
-    // Đổi trạng thái phòng sang maintenance (cần dọn dẹp)
-    await this.roomRepository.update(booking.room_id, { status: 'maintenance' });
+    // Phòng cần dọn dẹp sau khi khách trả.
+    await this.updateBookingRooms(booking, 'maintenance');
 
     return {
       message: 'Check-out thành công. Mã PIN đã được vô hiệu hóa.',
       booking_id: booking.id,
       room_status: 'maintenance',
     };
+  }
+
+  private async updateBookingRooms(booking: Booking, status: 'occupied' | 'maintenance') {
+    const roomIds = [...(booking.booking_rooms || []).map(line => line.room_id), booking.room_id].filter(Boolean) as number[];
+    if (!roomIds.length) return;
+    await this.roomRepository.update(roomIds, { status });
   }
 
   async remoteUnlock(lockId: number) {

@@ -1,7 +1,7 @@
 import { Payment, Refund, Transaction } from '../../entities/booking.entity';
 
 // The ledger and payment rows can describe the same receipt. Refund records and
-// refund ledger rows can also describe the same payout; never count either twice.
+// refund ledger rows can also describe the same wallet credit; never count either twice.
 export function customerNetPaid(payments: Payment[], transactions: Transaction[], refunds: Refund[] = []) {
   const cents = (amount: number) => Math.round(Number(amount) * 100);
   const received = transactions.length

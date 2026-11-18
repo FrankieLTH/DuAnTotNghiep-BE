@@ -81,10 +81,10 @@ async function api(path, body, method = body ? 'POST' : 'GET') {
   const requests = await api(`/bookings/${bookingId}/requests`);
   assert.equal(requests.find(r => r.id === refund.id).status, 'approved');
   assert.equal((await api(`/bookings/${bookingId}`)).paid_amount, 500000, 'Approval must not fabricate transferred money');
-  const [[tables]] = await db.query("SELECT COUNT(*) AS n FROM information_schema.TABLES WHERE TABLE_SCHEMA=DATABASE() AND TABLE_TYPE='BASE TABLE'"); assert.equal(Number(tables.n), 24);
+  const [[tables]] = await db.query("SELECT COUNT(*) AS n FROM information_schema.TABLES WHERE TABLE_SCHEMA=DATABASE() AND TABLE_TYPE='BASE TABLE'"); assert.equal(Number(tables.n), 25);
   const [[count]] = await db.query('SELECT COUNT(*) AS n FROM BOOKINGS WHERE customer_id=?', [customerId]);
   assert.equal(Number(count.n), 1);
-  console.log('PASS: running Docker app saves draft before payment, lists it in lookup, resumes guest fields, restores payment stage, shares cancel/refund requests with admin approval/rejection, and keeps 24 tables.');
+  console.log('PASS: running Docker app saves draft before payment, lists it in lookup, resumes guest fields, restores payment stage, shares cancel/refund requests with admin approval/rejection, and keeps 25 tables.');
 })().catch(error => { console.error(error.message); process.exitCode = 1; }).finally(async () => {
   if (db) {
     if (blockerId) await db.query('DELETE FROM BOOKINGS WHERE id=? AND customer_id=?', [blockerId, customerId]);

@@ -40,7 +40,7 @@ export function calculateRoomPrice(
   const cfg = STAY_TYPE_FACTORS[normType] || STAY_TYPE_FACTORS.fullday;
   const nights = normType === 'daytime' ? 1 : calculateNights(checkIn, checkOut);
   const priceFactor = cfg.factor;
-  const unitPrice = Math.round(basePrice * priceFactor * nights);
+  const unitPrice = Math.round(basePrice * priceFactor) * nights;
 
   return { unitPrice, nights, priceFactor };
 }
@@ -89,7 +89,12 @@ export interface SearchCriteria {
 }
 
 export interface AvailableRoomType {
+  variantKey?: string;
+  roomIds?: number[];
+  featurePricePerNight?: number;
+  features?: {id:number;name:string;extra_price_per_night:number}[];
   roomTypeId: number;
+  roomId?: number;
   apartmentId: number;
   apartmentName?: string;
   name: string;
@@ -108,7 +113,13 @@ export interface BasketGuestSlot {
 }
 
 export interface BasketItem {
+  variantKey?: string;
+  roomIds?: number[];
+  featurePricePerNight?: number;
+  features?: {id:number;name:string;extra_price_per_night:number}[];
   roomTypeId: number;
+  roomId?: number;
+  maxOccupancy?: number;
   roomTypeName: string;
   quantity: number;
   area?: number;
@@ -124,6 +135,8 @@ export interface BasketItem {
 
 export interface Basket {
   id: string;
+  apartmentId?: number;
+  apartmentName?: string;
   items: BasketItem[];
   totalRooms: number;
   totalCapacity: number;
@@ -183,6 +196,7 @@ export function generateCombos(
     }
 
     for (let i = startIdx; i < types.length; i++) {
+      if (current.length && current[0].apartmentId !== types[i].apartmentId) continue;
       current.push(types[i]);
       recurse(i, current); // Cho phép lặp loại phòng (i thay vì i + 1)
       current.pop();
@@ -322,14 +336,14 @@ export function buildBaskets(
 
   for (const combo of rawCombos) {
     // 1. Kiểm tra quantity từng loại phòng <= availableCount
-    const countMap = new Map<number, number>();
+    const countMap = new Map<string, number>();
     for (const rt of combo) {
-      countMap.set(rt.roomTypeId, (countMap.get(rt.roomTypeId) || 0) + 1);
+      const key=rt.variantKey||String(rt.roomTypeId);countMap.set(key,(countMap.get(key)||0)+1);
     }
 
     let isCountOk = true;
     for (const [rtId, count] of countMap.entries()) {
-      const rt = validTypes.find((t) => t.roomTypeId === rtId);
+      const rt = validTypes.find((t) => (t.variantKey||String(t.roomTypeId)) === rtId);
       if (!rt || count > rt.availableCount) {
         isCountOk = false;
         break;
@@ -367,14 +381,15 @@ export function buildBaskets(
     const { combo, slots, spare, totalCapacity } = item;
 
     // Gom các phòng cùng loại thành BasketItem
-    const groupMap = new Map<number, { rt: AvailableRoomType; qty: number; guests: BasketGuestSlot[] }>();
+    const groupMap = new Map<string, { rt: AvailableRoomType; qty: number; guests: BasketGuestSlot[] }>();
     for (let i = 0; i < combo.length; i++) {
       const rt = combo[i];
       const slot = slots[i];
-      if (!groupMap.has(rt.roomTypeId)) {
-        groupMap.set(rt.roomTypeId, { rt, qty: 1, guests: [slot] });
+      const key=rt.variantKey||String(rt.roomTypeId);
+      if (!groupMap.has(key)) {
+        groupMap.set(key, { rt, qty: 1, guests: [slot] });
       } else {
-        const existing = groupMap.get(rt.roomTypeId)!;
+        const existing = groupMap.get(key)!;
         existing.qty += 1;
         existing.guests.push(slot);
       }
@@ -384,17 +399,21 @@ export function buildBaskets(
     const basketItems: BasketItem[] = [];
 
     for (const group of groupMap.values()) {
-      const { unitPrice } = calculateRoomPrice(
+      const { unitPrice: typePrice, nights: stayNights } = calculateRoomPrice(
         group.rt.basePrice,
         criteria.stayType,
         criteria.checkIn,
         criteria.checkOut
       );
+      const unitPrice=typePrice+Number(group.rt.featurePricePerNight||0)*stayNights;
       const totalItemPrice = unitPrice * group.qty;
       subtotalPrice += totalItemPrice;
 
       basketItems.push({
         roomTypeId: group.rt.roomTypeId,
+        variantKey:group.rt.variantKey,roomIds:group.rt.roomIds?.slice(0,group.qty),featurePricePerNight:group.rt.featurePricePerNight||0,features:group.rt.features||[],
+        roomId: group.rt.roomId,
+        maxOccupancy: group.rt.maxOccupancy,
         roomTypeName: group.rt.name,
         quantity: group.qty,
         area: group.rt.area,
@@ -415,6 +434,8 @@ export function buildBaskets(
 
     baskets.push({
       id: `basket_${basketCounter++}`,
+      apartmentId: combo[0]?.apartmentId,
+      apartmentName: combo[0]?.apartmentName,
       items: basketItems,
       totalRooms: n,
       totalCapacity,
@@ -433,7 +454,7 @@ export function buildBaskets(
 
   for (const b of baskets) {
     const signature = b.items
-      .map((it) => `${it.roomTypeId}x${it.quantity}`)
+      .map((it) => `${it.variantKey||it.roomTypeId}x${it.quantity}`)
       .sort()
       .join('|');
     if (!seenCombos.has(signature)) {

@@ -67,8 +67,10 @@ export class CustomerBookingQuery {
   @IsOptional() @IsInt() @Min(1) @Max(100000) page: number = 1;
 }
 export class GuestRoomSelectionDto {
+  @IsOptional() @IsArray() @ArrayMinSize(1) @ArrayMaxSize(10) @IsInt({ each: true }) @Min(1, { each: true }) room_ids?: number[];
   @IsInt() @Min(1) room_type_id: number;
   @IsInt() @Min(1) @Max(10) quantity: number;
+  @IsOptional() @IsInt() @Min(0) @Max(10) extra_beds?: number;
 }
 export class GuestBookingDto {
   @Transform(({ value }) => typeof value === 'string' ? value.trim().toLowerCase() : value)

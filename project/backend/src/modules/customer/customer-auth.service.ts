@@ -94,7 +94,7 @@ export class CustomerAuthService implements OnModuleDestroy {
     await this.storage(() => this.redis.set(`customer:session:${jti}`, String(customer.id), 'EX', 7200));
     return { access_token, customer: this.profile(customer), scope, expires_in: 7200 };
   }
-  profile(customer: Customer) { return { id: customer.id, full_name: customer.full_name, email: customer.email, phone: customer.phone, account_created_at: customer.account_created_at, email_verified_at: customer.email_verified_at }; }
+  profile(customer: Customer) { return { id: customer.id, full_name: customer.full_name, email: customer.email, phone: customer.phone, account_created_at: customer.account_created_at, email_verified_at: customer.email_verified_at, wallet_balance: Number(customer.wallet_balance || 0), wallet_available: Math.max(0, Number(customer.wallet_balance || 0) - Number(customer.wallet_reserved || 0)) }; }
   async authenticate(token: string) {
     let payload: any;
     try { payload = this.jwt.verify(token); } catch { throw new UnauthorizedException('Phiên đăng nhập đã hết hạn.'); }

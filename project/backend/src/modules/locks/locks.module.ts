@@ -6,10 +6,11 @@ import { LocksGateway } from './locks.gateway';
 import { Lock, LockPin, Booking } from '../../entities/booking.entity';
 import { Room } from '../../entities/room.entity';
 import { CustomerModule } from '../customer/customer.module';
+import { PermissionsGuard } from '../../common/guards/permissions.guard';
 
 @Module({
   imports: [TypeOrmModule.forFeature([Lock, LockPin, Booking, Room]), CustomerModule],
-  providers: [LocksService, LocksGateway],
+  providers: [LocksService, LocksGateway, PermissionsGuard],
   controllers: [LocksController],
   exports: [LocksService, LocksGateway],
 })

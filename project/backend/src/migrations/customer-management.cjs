@@ -6,15 +6,17 @@ const mysql = require('mysql2/promise');
   try {
     const [columns] = await db.query('SHOW COLUMNS FROM CUSTOMER');
     const existing = new Set(columns.map(column => column.Field));
-    for (const [name, definition] of [['password_hash', 'VARCHAR(255) NULL'], ['account_created_at', 'DATETIME NULL'], ['email_verified_at', 'DATETIME NULL']]) {
+    for (const [name, definition] of [['password_hash', 'VARCHAR(255) NULL'], ['account_created_at', 'DATETIME NULL'], ['email_verified_at', 'DATETIME NULL'], ['wallet_balance', 'DECIMAL(12,2) NOT NULL DEFAULT 0'], ['wallet_reserved', 'DECIMAL(12,2) NOT NULL DEFAULT 0']]) {
       if (!existing.has(name)) await db.query(`ALTER TABLE CUSTOMER ADD COLUMN ${name} ${definition}`);
     }
     const [bookingColumns] = await db.query('SHOW COLUMNS FROM BOOKINGS');
-    for (const [name, definition] of [['checkout_data', 'JSON NULL'], ['stay_type', 'VARCHAR(32) NULL'], ['start_at', 'DATETIME NULL'], ['end_at', 'DATETIME NULL']]) {
-      if (!bookingColumns.some(column => column.Field === name)) await db.query(`ALTER TABLE BOOKINGS ADD COLUMN ${name} ${definition}`);
+    if (!bookingColumns.some(column => column.Field === 'checkout_data')) {
+      await db.query('ALTER TABLE BOOKINGS ADD COLUMN checkout_data JSON NULL');
     }
-    const [roomColumns] = await db.query('SHOW COLUMNS FROM Booking_rooms');
-    if (!roomColumns.some(column => column.Field === 'unit_price')) await db.query('ALTER TABLE Booking_rooms ADD COLUMN unit_price DECIMAL(12,2) NOT NULL DEFAULT 0');
+    const [paymentColumns] = await db.query('SHOW COLUMNS FROM payments');
+    if (!paymentColumns.some(column => column.Field === 'provider_data')) await db.query('ALTER TABLE payments ADD COLUMN provider_data JSON NULL');
+    const [payos] = await db.query("SELECT id FROM payment_methods WHERE provider_code='PAYOS' LIMIT 1");
+    if (!payos.length) await db.query("INSERT INTO payment_methods (method_name,provider_code,is_active) VALUES ('Chuyển khoản PayOS','PAYOS',1)");
     // Counter receipts can live in TRANSACTION without a payments row; refunds
     // still reference the booking and must not require a fabricated payment.
     const [refundColumns] = await db.query('SHOW COLUMNS FROM refunds');

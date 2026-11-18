@@ -1,5 +1,5 @@
 // ============================================================================
-// REALTIME SYNC CLIENT (SSE Stream with Auto-Reconnect & Polling Fallback)
+// REALTIME SYNC CLIENT (authenticated polling)
 // Payload chứa ID-only (Zero PII leak) -> Kích hoạt re-fetch dữ liệu
 // ============================================================================
 
@@ -17,14 +17,11 @@ export interface RealtimeMessage {
 export type RealtimeEventHandler = (event: RealtimeMessage) => void;
 
 class RealtimeSyncManager {
-  private eventSource: EventSource | null = null;
   private pollingTimer: any = null;
   private listeners: Set<RealtimeEventHandler> = new Set();
   private lastTimestamp: string = new Date().toISOString();
-  private isConnected: boolean = false;
   private apartmentId?: number;
   private customerId?: number;
-  private isStaff: boolean = false;
 
   /**
    * Khởi động kết nối Realtime (Ưu tiên SSE, fallback sang Polling nếu mạng chặn)
@@ -36,10 +33,11 @@ class RealtimeSyncManager {
   }) {
     this.apartmentId = options?.apartmentId;
     this.customerId = options?.customerId;
-    this.isStaff = options?.isStaff || false;
 
     this.disconnect();
-    this.initSSE();
+    // Native EventSource cannot attach Authorization headers. Use the protected
+    // polling endpoint so the JWT stays in a header instead of the URL.
+    this.startPollingFallback();
   }
 
   /**
@@ -52,44 +50,6 @@ class RealtimeSyncManager {
     };
   }
 
-  private initSSE() {
-    try {
-      const queryParams = new URLSearchParams();
-      if (this.apartmentId) queryParams.set('apartment_id', String(this.apartmentId));
-      if (this.customerId) queryParams.set('customer_id', String(this.customerId));
-
-      const sseUrl = `/api/admin/events/stream?${queryParams.toString()}`;
-      this.eventSource = new EventSource(sseUrl);
-
-      this.eventSource.onopen = () => {
-        this.isConnected = true;
-        this.stopPollingFallback();
-      };
-
-      this.eventSource.onmessage = (event) => {
-        try {
-          const data: RealtimeMessage = JSON.parse(event.data);
-          this.lastTimestamp = data.timestamp;
-          this.notifyListeners(data);
-        } catch {
-          // Ignore parse errors on heartbeat
-        }
-      };
-
-      this.eventSource.onerror = () => {
-        this.isConnected = false;
-        if (this.eventSource) {
-          this.eventSource.close();
-          this.eventSource = null;
-        }
-        // Tự động chuyển sang chế độ Polling fallback mỗi 20 giây
-        this.startPollingFallback();
-      };
-    } catch {
-      this.startPollingFallback();
-    }
-  }
-
   private startPollingFallback() {
     if (this.pollingTimer) return;
 
@@ -100,7 +60,10 @@ class RealtimeSyncManager {
         if (this.apartmentId) queryParams.set('apartment_id', String(this.apartmentId));
         if (this.customerId) queryParams.set('customer_id', String(this.customerId));
 
-        const res = await fetch(`/api/admin/events/poll?${queryParams.toString()}`);
+        const token = sessionStorage.getItem('homestay_admin_token');
+        const res = await fetch(`/api/admin/events/poll?${queryParams.toString()}`, {
+          headers: token ? { Authorization: `Bearer ${token}` } : {},
+        });
         if (res.ok) {
           const events: RealtimeMessage[] = await res.json();
           if (Array.isArray(events)) {
@@ -134,12 +97,7 @@ class RealtimeSyncManager {
   }
 
   public disconnect() {
-    if (this.eventSource) {
-      this.eventSource.close();
-      this.eventSource = null;
-    }
     this.stopPollingFallback();
-    this.isConnected = false;
   }
 }
 

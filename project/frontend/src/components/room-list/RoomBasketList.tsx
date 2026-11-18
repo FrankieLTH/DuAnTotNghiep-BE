@@ -2,6 +2,8 @@ import React, { useState, useEffect } from 'react';
 import {
   Basket,
   SearchCriteria,
+  RoomTypeOption,
+  getRoomTypeOptions,
   getRoomBaskets,
 } from '../../services/dataService';
 import { calculateNights } from '@shared/helpers/pricing';
@@ -9,14 +11,12 @@ import { calculateNights } from '@shared/helpers/pricing';
 interface RoomBasketListProps {
   criteria: SearchCriteria;
   onSelectBasket: (basket: Basket) => void;
-  onSwitchToIndividual?: () => void;
   onSelectRoomDetail?: (roomId: number, basket: Basket) => void;
 }
 
 export const RoomBasketList: React.FC<RoomBasketListProps> = ({
   criteria,
   onSelectBasket,
-  onSwitchToIndividual,
   onSelectRoomDetail,
 }) => {
   const [baskets, setBaskets] = useState<Basket[]>([]);
@@ -25,8 +25,9 @@ export const RoomBasketList: React.FC<RoomBasketListProps> = ({
   const [sortOption, setSortOption] = useState<'default' | 'price_asc' | 'price_desc'>('default');
   const [visibleCount, setVisibleCount] = useState<number>(4);
   const [extraMattressMap, setExtraMattressMap] = useState<Record<string, boolean>>({});
+  const [variantOptions, setVariantOptions] = useState<Record<string, RoomTypeOption[]>>({});
 
-  const nights = calculateNights(criteria.checkIn, criteria.checkOut);
+  const nights = criteria.stayType === 'daytime' ? 1 : calculateNights(criteria.checkIn, criteria.checkOut);
   const EXTRA_MATTRESS_NIGHTLY_RATE = 150000;
 
   const toggleExtraMattress = (basketId: string, itemIdx: number) => {
@@ -37,12 +38,55 @@ export const RoomBasketList: React.FC<RoomBasketListProps> = ({
     }));
   };
 
+  const itemKey = (basketId: string, itemIdx: number) => `${basketId}_item_${itemIdx}`;
+
+  const updateItemQuantity = (basketId: string, itemIdx: number, quantity: number) => {
+    const options = variantOptions[itemKey(basketId, itemIdx)] || [];
+    setBaskets(previous => previous.map(basket => {
+      if (basket.id !== basketId) return basket;
+      const item = basket.items[itemIdx];
+      if (!item) return basket;
+      const selected = options.find(option => option.roomTypeId === item.roomTypeId);
+      const max = selected?.availableCount ?? 0;
+      const nextQuantity = Math.max(0, Math.min(Math.floor(quantity), max));
+      return { ...basket, items: basket.items.map((row, index) => index === itemIdx
+        ? { ...row, quantity: nextQuantity, roomIds: (selected?.roomIds || row.roomIds || []).slice(0, nextQuantity) }
+        : row) };
+    }));
+  };
+
+  const updateItemVariant = (basketId: string, itemIdx: number, roomTypeId: number) => {
+    const key = itemKey(basketId, itemIdx);
+    const option = variantOptions[key]?.find(row => row.roomTypeId === roomTypeId);
+    if (!option) return;
+    setBaskets(previous => previous.map(basket => {
+      if (basket.id !== basketId) return basket;
+      const item = basket.items[itemIdx];
+      if (!item) return basket;
+      const quantity = Math.min(item.quantity, option.availableCount);
+      return { ...basket, items: basket.items.map((row, index) => index === itemIdx ? {
+        ...row,
+        roomTypeId: option.roomTypeId,
+        variantKey: option.variantKey || String(option.roomTypeId),
+        roomTypeName: option.name,
+        maxOccupancy: (option as any).maxOccupancy || row.maxOccupancy,
+        basePrice: option.basePricePerNight,
+        unitPrice: option.totalPrice,
+        roomIds: (option.roomIds || []).slice(0, quantity),
+        features: option.features || [],
+        featurePricePerNight: option.featurePricePerNight || 0,
+        quantity,
+      } : row) };
+    }));
+    setExtraMattressMap(previous => ({ ...previous, [key]: false }));
+  };
+
   const getEnrichedBasket = (basket: Basket): Basket => {
     let mattressTotal = 0;
     const enrichedItems = basket.items.map((item, idx) => {
-      const key = `${basket.id}_item_${idx}`;
-      const hasMattress = !!extraMattressMap[key];
-      const mattressFee = hasMattress ? EXTRA_MATTRESS_NIGHTLY_RATE * nights : 0;
+      const key = itemKey(basket.id, idx);
+      const hasMattress = !!extraMattressMap[key] && item.quantity > 0;
+      const mattressFee = hasMattress ? EXTRA_MATTRESS_NIGHTLY_RATE * nights * item.quantity : 0;
       mattressTotal += mattressFee;
 
       return {
@@ -52,11 +96,39 @@ export const RoomBasketList: React.FC<RoomBasketListProps> = ({
       };
     });
 
+    const totalRooms = enrichedItems.reduce((sum, item) => sum + item.quantity, 0);
+    const totalCapacity = enrichedItems.reduce((sum, item) => sum + (item.maxOccupancy || 2) * item.quantity, 0);
+    const subtotal = enrichedItems.reduce((sum, item) => sum + item.unitPrice * item.quantity, 0) + mattressTotal;
+    const discountAmount = Math.min(subtotal, Number(basket.discountAmount || 0));
+    const spare = totalCapacity - criteria.adults;
+
+    // Reassign the searched party to the customized room counts and capacities.
+    const expanded = enrichedItems.flatMap((item, itemIndex) => Array.from({ length: item.quantity }, (_, roomIndex) => ({ itemIndex, roomIndex, capacity: item.maxOccupancy || 2, guests: { adults: 1, children: 0 } })));
+    let remainingAdults = criteria.adults - expanded.length;
+    let assignable = remainingAdults >= 0 && totalCapacity >= criteria.adults;
+    while (assignable && remainingAdults > 0) {
+      const target = expanded.map((room, index) => ({ index, remaining: room.capacity - room.guests.adults })).sort((a, b) => b.remaining - a.remaining)[0];
+      if (!target || target.remaining <= 0) { assignable = false; break; }
+      expanded[target.index].guests.adults += 1;
+      remainingAdults -= 1;
+    }
+    if (assignable) for (let i = 0; i < criteria.children; i++) expanded[i % Math.max(1, expanded.length)].guests.children += 1;
+    let slot = 0;
+    const allocatedItems = enrichedItems.map(item => ({ ...item, guests: assignable ? Array.from({ length: item.quantity }, () => expanded[slot++].guests) : [] }));
+    const tags = basket.tags.filter(tag => tag !== 'exact_fit');
+    if (totalRooms > 0 && spare === 0) tags.push('exact_fit');
+
     return {
       ...basket,
-      items: enrichedItems,
+      items: allocatedItems,
+      totalRooms,
+      totalCapacity,
+      spare,
+      tags,
+      discountAmount: discountAmount || undefined,
       extraMattressTotal: mattressTotal,
-      totalPrice: basket.totalPrice + mattressTotal,
+      nightlyPrice: nights > 0 ? Math.round(Math.max(0, subtotal - discountAmount) / nights) : 0,
+      totalPrice: Math.max(0, subtotal - discountAmount),
     };
   };
 
@@ -65,23 +137,33 @@ export const RoomBasketList: React.FC<RoomBasketListProps> = ({
     setLoading(true);
     setError(null);
 
-    getRoomBaskets({
-      ...criteria,
-      sort: sortOption,
-    })
-      .then((data) => {
-        if (!isCancelled) {
-          setBaskets(data || []);
-          setLoading(false);
-        }
-      })
-      .catch((err) => {
+    const load = async () => {
+      try {
+        const data = await getRoomBaskets({ ...criteria, sort: sortOption });
+        if (isCancelled) return;
+        setBaskets(data || []);
+        setLoading(false);
+        const typeIds = [...new Set((data || []).flatMap(basket => basket.items.map(item => item.roomTypeId)))];
+        const results = await Promise.all(typeIds.map(async id => {
+          try {
+            const options = await getRoomTypeOptions(id, criteria.checkIn, criteria.checkOut, 1, { stayType: criteria.stayType, children: criteria.children, rooms: criteria.rooms });
+            return [id, options] as const;
+          } catch { return [id, []] as const; }
+        }));
+        if (isCancelled) return;
+        const byType = new Map<number, RoomTypeOption[]>(results);
+        const keyed: Record<string, RoomTypeOption[]> = {};
+        for (const basket of data || []) basket.items.forEach((item, index) => { keyed[itemKey(basket.id, index)] = byType.get(item.roomTypeId) || []; });
+        setVariantOptions(keyed);
+      } catch (err) {
         if (!isCancelled) {
           console.error('Lỗi khi tải giỏ phòng:', err);
-          setError('Không thể tải danh sách giỏ phòng. Bạn có thể chuyển sang chế độ chọn từng phòng.');
+          setError('Không thể tải các giỏ phòng gợi ý. Vui lòng kiểm tra ngày lưu trú hoặc thử tìm kiếm lại.');
           setLoading(false);
         }
-      });
+      }
+    };
+    load();
 
     return () => {
       isCancelled = true;
@@ -124,17 +206,8 @@ export const RoomBasketList: React.FC<RoomBasketListProps> = ({
         </h3>
         <p className="text-xs text-[#736B63] max-w-md mx-auto leading-relaxed">
           Hiện tại không có tổ hợp {criteria.rooms} phòng nào vừa khít cho đoàn {criteria.adults} người lớn trong khung giờ này.
-          Bạn có thể nới lỏng ngày đặt hoặc chuyển sang chọn từng phòng riêng lẻ.
+          Bạn có thể điều chỉnh ngày hoặc số khách rồi tìm lại.
         </p>
-        {onSwitchToIndividual && (
-          <button
-            type="button"
-            onClick={onSwitchToIndividual}
-            className="mt-2 bg-[#9E472A] hover:bg-[#853C23] text-white text-xs font-bold py-2.5 px-6 rounded-xl transition-all shadow-xs cursor-pointer"
-          >
-            Chuyển sang chọn từng loại phòng →
-          </button>
-        )}
       </div>
     );
   }
@@ -172,6 +245,11 @@ export const RoomBasketList: React.FC<RoomBasketListProps> = ({
           const basket = getEnrichedBasket(rawBasket);
           const isBestFit = basket.tags.includes('exact_fit');
           const isCheapest = basket.tags.includes('cheapest');
+          const inventoryValid = basket.items.every((item, itemIdx) => {
+            const available = variantOptions[itemKey(basket.id, itemIdx)]?.find(option => option.roomTypeId === item.roomTypeId)?.availableCount;
+            return available !== undefined && item.quantity <= available;
+          });
+          const canBook = inventoryValid && basket.totalRooms > 0 && basket.totalCapacity >= criteria.adults;
 
           return (
             <div
@@ -220,7 +298,7 @@ export const RoomBasketList: React.FC<RoomBasketListProps> = ({
 
                   {basket.extraMattressTotal && basket.extraMattressTotal > 0 ? (
                     <span className="bg-[#FEF3C7] text-[#92400E] text-xs font-bold px-2.5 py-0.5 rounded-full border border-[#FDE68A]">
-                      🛏️ Kèm nệm phụ (+{(basket.extraMattressTotal).toLocaleString('vi-VN')}đ)
+                      🛏️ Kèm nệm phụ
                     </span>
                   ) : null}
 
@@ -247,13 +325,17 @@ export const RoomBasketList: React.FC<RoomBasketListProps> = ({
               {/* 2. DANH SÁCH TỪNG PHÒNG (BỐ CỤC TỪ TRÊN XUỐNG, ĐẦY ĐỦ THÔNG SỐ CỤ THỂ) */}
               <div className="p-6 space-y-4">
                 <div className="text-xs font-bold uppercase tracking-wider text-[#736B63] flex items-center justify-between border-b border-[#F0EBE1] pb-2">
-                  <span>Chi tiết {basket.totalRooms} phòng trong combo:</span>
+                  <span>Các loại phòng trong giỏ · {basket.totalRooms} phòng đang chọn:</span>
                   <span className="text-[#9E472A] font-semibold lowercase">
                     Nhấp vào tên hoặc ảnh phòng để xem chi tiết
                   </span>
                 </div>
 
                 {basket.items.map((item, itemIdx) => {
+                  const key = itemKey(basket.id, itemIdx);
+                  const options = variantOptions[key] || [];
+                  const selectedOption = options.find(option => option.roomTypeId === item.roomTypeId);
+                  const maxQuantity = selectedOption?.availableCount ?? 0;
                   return (
                     <div
                       key={`${item.roomTypeId}_${itemIdx}`}
@@ -262,7 +344,7 @@ export const RoomBasketList: React.FC<RoomBasketListProps> = ({
                       {/* Hình ảnh & Thông số cốt lõi */}
                       <div className="flex flex-col sm:flex-row gap-4 items-start sm:items-center flex-1">
                         <div
-                          onClick={() => onSelectRoomDetail && onSelectRoomDetail(item.roomTypeId, basket)}
+                          onClick={() => onSelectRoomDetail && onSelectRoomDetail(item.roomId || item.roomTypeId, basket)}
                           className="w-full sm:w-36 h-28 sm:h-24 rounded-xl overflow-hidden shrink-0 shadow-2xs cursor-pointer group relative"
                           title="Nhấp để xem chi tiết phòng này"
                         >
@@ -287,7 +369,7 @@ export const RoomBasketList: React.FC<RoomBasketListProps> = ({
                             </span>
 
                             <h4
-                              onClick={() => onSelectRoomDetail && onSelectRoomDetail(item.roomTypeId, basket)}
+                              onClick={() => onSelectRoomDetail && onSelectRoomDetail(item.roomId || item.roomTypeId, basket)}
                               className="font-bold text-base text-[#1A1615] hover:text-[#9E472A] cursor-pointer transition-colors flex items-center gap-1.5"
                               title="Nhấp để xem chi tiết phòng này"
                             >
@@ -297,6 +379,35 @@ export const RoomBasketList: React.FC<RoomBasketListProps> = ({
                               </span>
                             </h4>
                           </div>
+
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2 max-w-xl">
+                            <label className="block text-[11px] text-[#736B63]">
+                              <span className="block font-semibold mb-1">Biến thể phòng</span>
+                              <select
+                                value={item.roomTypeId}
+                                onChange={event => updateItemVariant(basket.id, itemIdx, Number(event.target.value))}
+                                disabled={!options.length}
+                                className="w-full rounded-lg border border-[#D8CFC3] bg-white px-3 py-2 text-xs text-[#241C18] disabled:opacity-60"
+                              >
+                                {!options.length && <option value={item.roomTypeId}>Đang tải biến thể…</option>}
+                                {options.length > 0 && !selectedOption && <option value={item.roomTypeId} disabled>{item.roomTypeName} · hiện không còn trống</option>}
+                                {options.map(option => (
+                                  <option key={option.roomTypeId} value={option.roomTypeId}>
+                                    {option.variantLabel} · {Math.round(option.totalPrice / Math.max(1, nights)).toLocaleString('vi-VN')}đ/đêm · còn {option.availableCount}
+                                  </option>
+                                ))}
+                              </select>
+                            </label>
+                            <div className="text-[11px] text-[#736B63]">
+                              <span className="block font-semibold mb-1">Số phòng (còn {maxQuantity})</span>
+                              <div className="inline-flex items-center rounded-lg border border-[#D8CFC3] bg-white overflow-hidden">
+                                <button type="button" aria-label="Giảm số phòng" disabled={item.quantity <= 0} onClick={() => updateItemQuantity(basket.id, itemIdx, item.quantity - 1)} className="px-3 py-2 font-bold disabled:opacity-40">−</button>
+                                <span className="min-w-10 text-center font-bold text-[#241C18]">{item.quantity}</span>
+                                <button type="button" aria-label="Tăng số phòng" disabled={!selectedOption || item.quantity >= maxQuantity} onClick={() => updateItemQuantity(basket.id, itemIdx, item.quantity + 1)} className="px-3 py-2 font-bold disabled:opacity-40">+</button>
+                              </div>
+                            </div>
+                          </div>
+                          {item.quantity === 0 && <p className="text-[11px] text-[#8B6B5B]">Dòng này vẫn nằm trong giỏ nhưng hiện chưa chọn phòng.</p>}
 
                           {/* Thông số cụ thể */}
                           <div className="flex flex-wrap items-center gap-3 text-xs text-[#736B63]">
@@ -328,13 +439,14 @@ export const RoomBasketList: React.FC<RoomBasketListProps> = ({
                             )}
                             <button
                               type="button"
-                              onClick={() => onSelectRoomDetail && onSelectRoomDetail(item.roomTypeId, basket)}
+                              onClick={() => onSelectRoomDetail && onSelectRoomDetail(item.roomId || item.roomTypeId, basket)}
                               className="text-[11px] text-[#9E472A] font-bold hover:underline cursor-pointer ml-1"
                             >
                               👁️ Xem chi tiết &gt;
                             </button>
                           </div>
 
+                          {item.features?.length ? <div className="mt-2 space-y-1 text-[11px] text-[#736B63]" aria-label="Đặc điểm và phụ thu">{item.features.map(f=><div key={f.id}>{f.name}: <strong>{Number(f.extra_price_per_night)>0?`+${Number(f.extra_price_per_night).toLocaleString('vi-VN')}đ/đêm`:'Đã bao gồm'}</strong></div>)}</div>:null}
                           {/* TÙY CHỌN DỊCH VỤ THÊM NỆM PHỤ */}
                           <div className="pt-1">
                             <label className="inline-flex items-center gap-2 bg-[#F5F2EB] hover:bg-[#EFECE3] px-3 py-1.5 rounded-lg text-xs font-medium cursor-pointer transition-colors border border-[#E2DDD5]">
@@ -342,10 +454,11 @@ export const RoomBasketList: React.FC<RoomBasketListProps> = ({
                                 type="checkbox"
                                 checked={!!item.hasExtraMattress}
                                 onChange={() => toggleExtraMattress(basket.id, itemIdx)}
+                                disabled={item.quantity === 0}
                                 className="w-4 h-4 accent-[#9E472A] rounded cursor-pointer"
                               />
                               <span>
-                                🛏️ <strong>Thêm nệm phụ 1m2</strong> (+{EXTRA_MATTRESS_NIGHTLY_RATE.toLocaleString('vi-VN')}đ/đêm · Thêm 1 người ở chung)
+                                🛏️ <strong>Thêm nệm phụ 1m2</strong> (thêm 1 người ở chung)
                               </span>
                               {item.hasExtraMattress && (
                                 <span className="bg-[#2A694E] text-white text-[10px] font-bold px-1.5 py-0.2 rounded">
@@ -378,14 +491,9 @@ export const RoomBasketList: React.FC<RoomBasketListProps> = ({
                             Đơn giá {item.quantity > 1 ? 'mỗi phòng' : 'phòng này'}:
                           </span>
                           <span className="font-bold text-sm text-[#1A1615]">
-                            {Math.round(item.unitPrice / nights).toLocaleString('vi-VN')}đ{' '}
+                            {Math.round((item.unitPrice + (item.hasExtraMattress ? EXTRA_MATTRESS_NIGHTLY_RATE * nights : 0)) / nights).toLocaleString('vi-VN')}đ{' '}
                             <span className="font-normal text-xs text-[#736B63]">/ đêm</span>
                           </span>
-                          {item.hasExtraMattress && (
-                            <span className="text-[10px] text-[#9E472A] font-semibold block">
-                              +{(EXTRA_MATTRESS_NIGHTLY_RATE * nights).toLocaleString('vi-VN')}đ nệm phụ ({nights} đêm)
-                            </span>
-                          )}
                         </div>
                       </div>
                     </div>
@@ -402,7 +510,7 @@ export const RoomBasketList: React.FC<RoomBasketListProps> = ({
                       Tóm tắt combo:
                     </span>
                     <span className="bg-[#EAE6DE] text-[#1A1615] text-xs font-bold px-2 py-0.5 rounded">
-                      Gồm đúng {basket.totalRooms} phòng theo tìm kiếm
+                      Đã cập nhật theo {basket.totalRooms} phòng bạn chọn
                     </span>
                   </div>
 
@@ -422,29 +530,27 @@ export const RoomBasketList: React.FC<RoomBasketListProps> = ({
                 <div className="flex flex-col sm:flex-row md:flex-col items-end justify-between md:justify-center gap-3 shrink-0">
                   <div className="text-right">
                     <span className="text-xs text-[#736B63] block">
-                      Tổng tiền trọn gói <strong>{basket.totalRooms} phòng</strong> ({nights} đêm):
+                      Tổng tiền <strong>{basket.totalRooms} phòng đã chọn</strong> ({nights} đêm):
                     </span>
                     <div className="flex items-baseline gap-2">
                       <span className="text-3xl font-bold font-serif text-[#9E472A]">
                         {basket.totalPrice.toLocaleString('vi-VN')}đ
                       </span>
                     </div>
-                    {basket.extraMattressTotal && basket.extraMattressTotal > 0 ? (
-                      <span className="text-[11px] text-[#9E472A] font-semibold block">
-                        (Đã bao gồm +{(basket.extraMattressTotal).toLocaleString('vi-VN')}đ tiền nệm phụ)
-                      </span>
-                    ) : null}
                     <span className="text-[11px] text-[#2A694E] font-medium block">
                       ✓ Đã gồm VAT, phí dọn dẹp &amp; dịch vụ
                     </span>
                   </div>
 
+                  {!canBook && <p className="max-w-xs text-right text-xs text-[#A83232]">{basket.totalRooms === 0 ? 'Chọn ít nhất 1 phòng để tiếp tục.' : `Sức chứa ${basket.totalCapacity} chưa đủ cho ${criteria.adults} người lớn.`}</p>}
+
                   <button
                     type="button"
                     onClick={() => onSelectBasket(basket)}
-                    className="w-full sm:w-auto bg-[#9E472A] hover:bg-[#853C23] text-white font-bold py-3.5 px-8 rounded-xl shadow-md hover:shadow-lg transition-all flex items-center justify-center gap-2 text-sm cursor-pointer"
+                    disabled={!canBook}
+                    className="w-full sm:w-auto bg-[#9E472A] hover:bg-[#853C23] text-white font-bold py-3.5 px-8 rounded-xl shadow-md hover:shadow-lg transition-all flex items-center justify-center gap-2 text-sm cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
                   >
-                    <span>Đặt trọn giỏ này ({basket.totalRooms} phòng)</span>
+                    <span>Tiếp tục với giỏ này ({basket.totalRooms} phòng)</span>
                     <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path
                         strokeLinecap="round"

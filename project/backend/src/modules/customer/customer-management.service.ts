@@ -5,7 +5,7 @@ import { customerNetPaid } from './customer-finance';
 import { Customer } from '../../entities/user.entity';
 import { RoomType } from '../../entities/room.entity';
 import { CustomerBookingRequestDto, ReviewCustomerRequestDto, UpdateCustomerProfileDto } from './customer.dto';
-import { BookingStatus } from '@shared/enums';
+import { BookingStatus, TransactionType } from '@shared/enums';
 import { StaffContext } from '../../common/config/permissions.config';
 
 @Injectable()
@@ -17,7 +17,7 @@ export class CustomerManagementService {
     });
     const customer = await this.db.getRepository(Customer).findOneBy({ id: customerId, is_blocked: false, is_hidden: false });
     if (!customer) throw new NotFoundException('Không tìm thấy tài khoản.');
-    return { customer: { id: customer.id, full_name: customer.full_name, email: customer.email, phone: customer.phone, account_created_at: customer.account_created_at, email_verified_at: customer.email_verified_at } };
+    return { customer: { id: customer.id, full_name: customer.full_name, email: customer.email, phone: customer.phone, account_created_at: customer.account_created_at, email_verified_at: customer.email_verified_at, wallet_balance: Number(customer.wallet_balance || 0), wallet_available: Math.max(0, Number(customer.wallet_balance || 0) - Number(customer.wallet_reserved || 0)) } };
   }
 
   async ownedBooking(customerId: number, id: number) {
@@ -34,14 +34,21 @@ export class CustomerManagementService {
     return { ...row, status, ...(refund ? { refund_amount: Number(refund.refund_amount) } : {}) };
   }
   private async refundRequest(manager: EntityManager, bookingId: number, reason: string) {
+    const booking = await manager.getRepository(Booking).findOneBy({ id: bookingId });
+    if (!booking) throw new NotFoundException('Không tìm thấy booking.');
+    // Project policy: refund requests are reviewed by staff; approval credits exactly 50% of the remaining paid amount to the customer's wallet.
+    const percent = 50;
     const transactions = await manager.getRepository(Transaction).findBy({ booking_id: bookingId });
     const payments = await manager.getRepository(Payment).findBy({ booking_id: bookingId });
     const refunds = await manager.getRepository(Refund).findBy({ booking_id: bookingId });
-    const available = customerNetPaid(payments, transactions, refunds) - refunds.filter(r => ['requested', 'approved'].includes(r.status)).reduce((n, r) => n + Number(r.refund_amount), 0);
+    if (refunds.some(r => ['approved', 'processed'].includes(r.status))) throw new ConflictException('Đơn đã được hoàn tiền một lần.');
+    const available = customerNetPaid(payments, transactions, refunds) - refunds.filter(r => ['requested'].includes(r.status)).reduce((n, r) => n + Number(r.refund_amount), 0);
     if (available <= 0) throw new BadRequestException('Không còn khoản thanh toán có thể yêu cầu hoàn.');
+    const amount = Math.floor(available * 0.5);
+    if (amount < 1) throw new BadRequestException('Số tiền hoàn phải từ 1 đồng.');
     const paidRows = payments.filter(p => p.payment_status === 'paid');
-    const payment = paidRows.length === 1 && Number(paidRows[0].amount) >= available ? paidRows[0] : null;
-    return manager.getRepository(Refund).save({ booking_id: bookingId, payment_id: payment?.id || null, refund_amount: available, reason, status: 'requested' });
+    const payment = paidRows.length === 1 && Number(paidRows[0].amount) >= amount ? paidRows[0] : null;
+    return manager.getRepository(Refund).save({ booking_id: bookingId, payment_id: payment?.id || null, refund_amount: amount, refund_percentage: percent, reason, status: 'requested' });
   }
   async requests(customerId: number, bookingId: number) {
     const booking = await this.ownedBooking(customerId, bookingId);
@@ -72,6 +79,7 @@ export class CustomerManagementService {
         throw new BadRequestException('Chỉ booking đã xác nhận hoặc đang lưu trú mới được yêu cầu đổi phòng/gia hạn.');
       }
       if (data.type === 'refund') {
+        if (!['confirmed', 'cancelled'].includes(booking.booking_status) || booking.booked_start_time <= new Date()) throw new BadRequestException('Yêu cầu hoàn tiền chỉ áp dụng cho đơn đã thanh toán trước ngày nhận phòng.');
         const transactions = await manager.getRepository(Transaction).findBy({ booking_id: bookingId });
         const payments = await manager.getRepository(Payment).findBy({ booking_id: bookingId, payment_status: 'paid' });
         const refunds = await manager.getRepository(Refund).findBy({ booking_id: bookingId });
@@ -160,8 +168,28 @@ export class CustomerManagementService {
             const refunds = await manager.getRepository(Refund).findBy({ booking_id: booking.id });
             const reserved = refunds.filter(r => r.id !== refund.id && ['requested', 'approved'].includes(r.status)).reduce((n, r) => n + Number(r.refund_amount), 0);
             if (Number(refund.refund_amount) > customerNetPaid(payments, transactions, refunds) - reserved) throw new ConflictException('Số tiền còn có thể hoàn đã thay đổi. Cần kiểm tra lại giao dịch.');
+            if (refunds.some(r => r.id !== refund.id && ['approved', 'processed'].includes(r.status))) throw new ConflictException('Đơn đã được hoàn tiền.');
+            if (!['confirmed', 'cancelled'].includes(booking.booking_status) || booking.booked_start_time <= new Date()) throw new ConflictException('Đơn không còn đủ điều kiện hoàn tiền trước ngày nhận phòng.');
+            const customer = await manager.getRepository(Customer).findOne({ where: { id: booking.customer_id }, lock: { mode: 'pessimistic_write' } });
+            if (!customer) throw new NotFoundException('Không tìm thấy khách hàng để cộng số dư.');
+            const amount = Number(refund.refund_amount);
+            customer.wallet_balance = Number(customer.wallet_balance || 0) + amount;
+            await manager.getRepository(Customer).save(customer);
+            await manager.getRepository(Transaction).save(manager.getRepository(Transaction).create({ booking_id: booking.id, type: TransactionType.REFUND, amount, payment_method: 'customer_wallet', transaction_code: `WALLET_REFUND_${refund.id}`, note: `Hoàn ${refund.refund_percentage}% vào số dư khách hàng`, created_by: staff.staffId || null }));
+            refund.status = 'processed';
+
+            await manager.getRepository(Refund).save(refund);
+            if (booking.booking_status !== BookingStatus.CANCELLED) {
+              booking.booking_status = BookingStatus.CANCELLED;
+              booking.cancel_reason = row.reason;
+              booking.cancelled_at = new Date();
+              booking.cancelled_by = staff.staffId || null;
+              booking.hold_expires_at = null;
+              await manager.getRepository(BookingRoom).update({ bookings_id: booking.id }, { room_id: null });
+              await manager.getRepository(LockPin).update({ booking_id: booking.id }, { status: 'revoked' });
+            }
           }
-          if (data.status === 'approved' || data.status === 'rejected') { refund.status = data.status; await manager.getRepository(Refund).save(refund); }
+          if (data.status === 'rejected') { refund.status = 'rejected'; await manager.getRepository(Refund).save(refund); }
         }
       }
       if (row.type === 'cancel' && data.status === 'approved') {
@@ -171,11 +199,11 @@ export class CustomerManagementService {
         await manager.getRepository(LockPin).update({ booking_id: booking.id }, { status: 'revoked' });
       }
       const previous = { ...row };
-      row.status = data.status; row.staff_reply = data.staff_reply; row.handled_by = staff.actor; row.handled_at = new Date().toISOString();
+      row.status = row.type === 'refund' && data.status === 'approved' ? 'processed' : data.status; row.staff_reply = data.staff_reply; row.handled_by = staff.actor; row.handled_at = new Date().toISOString();
       booking.checkout_data = { ...booking.checkout_data, requests: rows };
       await manager.getRepository(Booking).save(booking);
       await manager.getRepository(AuditLog).save({ actor: staff.actor, action: 'REVIEW_CUSTOMER_REQUEST', entity_type: 'BOOKINGS', entity_id: booking.id, old_value: JSON.stringify(previous), new_value: JSON.stringify(row) });
-      return { message: data.status === 'approved' ? (row.type === 'cancel' ? 'Đã duyệt hủy đơn. Hoàn tiền (nếu có) được xử lý riêng.' : 'Đã duyệt yêu cầu hoàn tiền, chưa ghi nhận tiền đã chuyển trả.') : 'Đã cập nhật phản hồi cho khách.' };
+      return { message: data.status === 'approved' ? (row.type === 'cancel' ? 'Đã duyệt hủy đơn. Hoàn tiền (nếu có) được xử lý riêng.' : 'Đã cộng 50% tiền hoàn vào số dư khách hàng.') : 'Đã cập nhật phản hồi cho khách.' };
     });
   }
 }

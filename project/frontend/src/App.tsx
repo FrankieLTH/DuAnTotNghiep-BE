@@ -58,7 +58,7 @@ function App() {
 
   const [currentView, setCurrentView] = useState<ViewState>(getInitialView);
   const [bookingId, setBookingId] = useState(() => Number(window.location.pathname.match(/\/tra-cuu\/don\/(\d+)$/)?.[1] || 0));
-  const [bookingScope, setBookingScope] = useState<CustomerScope>(() => window.history.state?.customerScope || (getCustomerToken('account') ? 'account' : 'lookup'));
+  const [bookingScope, setBookingScope] = useState<CustomerScope>(() => window.history.state?.customerScope || sessionStorage.getItem(`payment_scope_${window.location.pathname.match(/\/tra-cuu\/don\/(\d+)$/)?.[1] || ''}`) as CustomerScope || (getCustomerToken('account') ? 'account' : 'lookup'));
   const [selectedRoomId, setSelectedRoomId] = useState<number>(1);
   const [selectedBasket, setSelectedBasket] = useState<Basket | null>(null);
   const [previousView, setPreviousView] = useState<ViewState | null>(null);
@@ -71,7 +71,7 @@ function App() {
       const pathname = window.location.pathname.toLowerCase();
       const match = pathname.match(/^\/tra-cuu\/don\/(\d+)$/);
       if (match) {
-        setBookingId(Number(match[1])); setBookingScope(window.history.state?.customerScope || (getCustomerToken('account') ? 'account' : 'lookup')); setCurrentView('booking-detail');
+        setBookingId(Number(match[1])); setBookingScope(window.history.state?.customerScope || sessionStorage.getItem(`payment_scope_${window.location.pathname.match(/\/tra-cuu\/don\/(\d+)$/)?.[1] || ''}`) as CustomerScope || (getCustomerToken('account') ? 'account' : 'lookup')); setCurrentView('booking-detail');
       } else if (['/tra-cuu', '/account', '/booking-lookup'].includes(pathname)) {
         setCurrentView('my-account');
       } else if (pathname === '/admin' || pathname.startsWith('/admin')) {
@@ -156,22 +156,20 @@ function App() {
             {/* 3. Dual Promo Banner có nền ảnh sang trọng */}
             <PromoVoucherSection onApplyVoucher={() => handleNavigate('vouchers')} />
 
-            {/* 4. Bento Grid: Không Gian Lưu Trú & Cảm Hứng Kiến Trúc */}
+            {/* 4. Danh Sách Phòng Nổi Bật */}
+            <RoomSelectionSection onSelectRoom={handleSelectRoom} />
+
+            {/* 5. Bento Grid: Không Gian Lưu Trú & Cảm Hứng Kiến Trúc */}
             <SpacesBentoSection onExplore={() => handleNavigate('room-list')} />
 
-            {/* 5. Dịch Vụ: 4 Vertical Cards */}
+            {/* 6. Dịch Vụ: 4 Vertical Cards */}
             <ServicesSection />
 
-            {/* 6. Điểm Check-in & Danh Thắng */}
+            {/* 7. Điểm Check-in & Danh Thắng */}
             <HighlightPlacesSection onExploreMore={() => handleNavigate('locations')} />
 
-            {/* 7. Trích Dẫn & Triết Lý */}
+            {/* 8. Trích Dẫn & Triết Lý */}
             <QuoteStatsSection />
-
-            {/* 8. Danh Sách Phòng Nổi Bật (3 tabs) */}
-            <RoomSelectionSection
-              onSelectRoom={handleSelectRoom}
-            />
 
             {/* 9. Trải Nghiệm Đánh Giá Khách Hàng (Ghi nhận của khách lưu trú - nằm ở dưới cùng) */}
             <TestimonialsSection />

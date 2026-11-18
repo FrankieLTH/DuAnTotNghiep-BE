@@ -1,10 +1,14 @@
-import api from './api';
+import api, { adminAuthHeaders } from './api';
 import {
   matchesDateFilter,
   computeDateCounts,
   DateView,
   DateSub,
   getVietnamDateString,
+  computeRoomDisplayStatus,
+  buildBatchPlan,
+  suggestFloor,
+  normalizeRoomNumber,
 } from '@shared/index';
 
 export type { DateView, DateSub };
@@ -155,12 +159,9 @@ export interface AuditLogItem {
 // ============================================================
 // API CLIENT CALLS
 // ============================================================
-const getHeaders = (role: StaffRole, actor?: string) => ({
-  headers: {
-    'x-staff-role': role,
-    'x-staff-actor': actor || `${role}_user@homestay.com`,
-  },
-});
+const getHeaders = (_role: StaffRole, _actor?: string) => {
+  return { headers: adminAuthHeaders() };
+};
 
 // ============================================================
 // VALIDATION HELPERS (SĐT & EMAIL / GMAIL)
@@ -197,6 +198,7 @@ export interface BranchItem {
 export interface RoomTypeItem {
   id: number;
   name: string;
+  parent_id?: number | null;
   apartment_id: number;
   apartment_name: string;
   base_price: number;
@@ -208,18 +210,64 @@ export interface RoomTypeItem {
   created_at: string;
   total_rooms: number;
   active_rooms: number;
-  images?: Array<{ id: number; image_url: string; sort_order: number }>;
+  images?: string[];
+  variants?: Array<{
+    id: number;
+    parent_id: number;
+    name: string;
+    base_price: number;
+    max_occupancy: number;
+    bed_config?: string;
+    is_active: boolean;
+    total_rooms: number;
+  }>;
   amenities?: Array<{ id: number; name: string }>;
+}
+
+export interface RoomGroupItem {
+  id: number | string;
+  name: string;
+  is_active: boolean;
+  created_at?: string;
+}
+
+export interface RoomFeatureItem {
+  id: number;
+  extra_price_per_night?: number;
+  name: string;
+  category: 'view' | 'sunlight' | 'comfort' | 'amenity';
+  is_active: boolean;
+  created_at?: string;
+}
+
+export interface RoomBlockItem {
+  id: number;
+  room_id: number;
+  from_at: string;
+  to_at: string | null;
+  reason: string;
+  created_by?: string;
+  created_at?: string;
 }
 
 export interface RoomItem {
   room_id: number;
   room_number: string;
+  floor: number;
+  room_group_id?: number | string | null;
+  room_group_name?: string | null;
+  note?: string | null;
+  housekeeping: 'clean' | 'dirty';
+  deleted_at?: string | null;
   apartment_id: number;
   apartment_name: string;
   room_type_id: number;
   room_type_name: string;
+  room_type_parent_id?: number | null;
+  room_type_parent_name?: string;
+  variant_name?: string;
   status: 'available' | 'occupied' | 'cleaning' | 'maintenance';
+  display_status?: string;
   is_hidden: boolean;
   created_at: string;
   lock_id?: number;
@@ -229,6 +277,8 @@ export interface RoomItem {
   last_sync_at?: string;
   is_ready_for_booking: boolean;
   special_features?: string;
+  feature_ids?: number[];
+  features?: RoomFeatureItem[];
 }
 
 export interface LockItem {
@@ -380,10 +430,58 @@ const defaultAdminRoomTypes: RoomTypeItem[] = [
   },
 ];
 
+export const defaultRoomGroups: RoomGroupItem[] = [
+  { id: 1, name: 'Phòng góc', is_active: true },
+  { id: 2, name: 'Hành lang', is_active: true },
+  { id: 3, name: 'Giữa dãy', is_active: true },
+  { id: 4, name: 'Cuối dãy', is_active: true },
+  { id: 5, name: 'Gần cầu thang', is_active: true },
+  { id: 6, name: 'Gần thang máy', is_active: true },
+];
+
+export const defaultRoomFeatures: RoomFeatureItem[] = [
+  { id: 1, name: 'View biển trực diện', category: 'view', is_active: true },
+  { id: 2, name: 'View biển một phần', category: 'view', is_active: true },
+  { id: 3, name: 'View hồ bơi', category: 'view', is_active: true },
+  { id: 4, name: 'View núi', category: 'view', is_active: true },
+  { id: 5, name: 'View vườn', category: 'view', is_active: true },
+  { id: 6, name: 'Đón nắng sáng', category: 'sunlight', is_active: true },
+  { id: 7, name: 'Hoàng hôn', category: 'sunlight', is_active: true },
+  { id: 8, name: 'Đón gió biển', category: 'sunlight', is_active: true },
+  { id: 9, name: 'Yên tĩnh', category: 'comfort', is_active: true },
+  { id: 10, name: 'Nhiều cửa sổ / thoáng', category: 'comfort', is_active: true },
+  { id: 11, name: 'Cách âm tốt', category: 'comfort', is_active: true },
+  { id: 12, name: 'Ban công riêng', category: 'amenity', is_active: true },
+  { id: 13, name: 'Cửa kính sát sàn', category: 'amenity', is_active: true },
+  { id: 14, name: 'Bồn tắm ngâm', category: 'amenity', is_active: true },
+  { id: 15, name: 'Jacuzzi riêng', category: 'amenity', is_active: true },
+  { id: 16, name: 'Gác lửng', category: 'amenity', is_active: true },
+  { id: 17, name: 'Bếp nhỏ', category: 'amenity', is_active: true },
+  { id: 18, name: 'Phòng thông nhau', category: 'amenity', is_active: true },
+];
+
+export const defaultRoomBlocks: RoomBlockItem[] = [
+  {
+    id: 1,
+    room_id: 2,
+    from_at: '2026-11-01T00:00:00Z',
+    to_at: null,
+    reason: 'Chuyển từ trạng thái cũ',
+    created_by: 'SYSTEM',
+    created_at: '2026-11-01T00:00:00Z',
+  },
+];
+
 const defaultAdminRooms: RoomItem[] = [
   {
     room_id: 1,
     room_number: 'P101',
+    floor: 1,
+    room_group_id: 1,
+    room_group_name: 'Phòng góc',
+    note: 'Gần sảnh chính',
+    housekeeping: 'clean',
+    deleted_at: null,
     apartment_id: 1,
     apartment_name: 'Chi nhánh 1 – Triền Núi Nhỏ',
     room_type_id: 1,
@@ -397,10 +495,17 @@ const defaultAdminRooms: RoomItem[] = [
     battery_level: 85,
     is_ready_for_booking: true,
     special_features: 'Ban công ngắm hoàng hôn 270°, bồn sục Jacuzzi ngoài trời',
+    feature_ids: [1, 7, 12, 15],
   },
   {
     room_id: 2,
     room_number: 'P102',
+    floor: 1,
+    room_group_id: 3,
+    room_group_name: 'Giữa dãy',
+    note: 'Đang bảo trì điều hòa',
+    housekeeping: 'clean',
+    deleted_at: null,
     apartment_id: 1,
     apartment_name: 'Chi nhánh 1 – Triền Núi Nhỏ',
     room_type_id: 1,
@@ -413,10 +518,17 @@ const defaultAdminRooms: RoomItem[] = [
     lock_status: 'offline',
     battery_level: 12,
     is_ready_for_booking: false,
+    feature_ids: [1, 7, 12],
   },
   {
     room_id: 3,
     room_number: 'P201',
+    floor: 2,
+    room_group_id: 1,
+    room_group_name: 'Phòng góc',
+    note: null,
+    housekeeping: 'clean',
+    deleted_at: null,
     apartment_id: 1,
     apartment_name: 'Chi nhánh 1 – Triền Núi Nhỏ',
     room_type_id: 2,
@@ -425,6 +537,7 @@ const defaultAdminRooms: RoomItem[] = [
     is_hidden: false,
     created_at: '2026-01-01T00:00:00Z',
     is_ready_for_booking: false,
+    feature_ids: [1, 8, 12],
   },
 ];
 
@@ -472,6 +585,15 @@ export const saveSimRoomTypes = (d: RoomTypeItem[]) => setSimData('room_types', 
 
 export const getSimRooms = (): RoomItem[] => getSimData('rooms', defaultAdminRooms);
 export const saveSimRooms = (d: RoomItem[]) => setSimData('rooms', d);
+
+export const getSimRoomGroups = (): RoomGroupItem[] => getSimData('room_groups', defaultRoomGroups);
+export const saveSimRoomGroups = (d: RoomGroupItem[]) => setSimData('room_groups', d);
+
+export const getSimRoomFeatures = (): RoomFeatureItem[] => getSimData('room_features', defaultRoomFeatures);
+export const saveSimRoomFeatures = (d: RoomFeatureItem[]) => setSimData('room_features', d);
+
+export const getSimRoomBlocks = (): RoomBlockItem[] => getSimData('room_blocks', defaultRoomBlocks);
+export const saveSimRoomBlocks = (d: RoomBlockItem[]) => setSimData('room_blocks', d);
 
 export const getSimCustomers = (): AdminCustomerItem[] => getSimData('customers', defaultCustomers);
 export const saveSimCustomers = (d: AdminCustomerItem[]) => setSimData('customers', d);
@@ -987,32 +1109,16 @@ export const adminApi = {
         paid_amount: bookingDraft.status === 'confirmed' ? (bookingDraft.total_price || 1200000) : 0,
         deposit_amount: bookingDraft.deposit_amount || Math.round((bookingDraft.total_price || 1200000) * 0.7),
         source: 'online',
-        rooms: bookingDraft.booking_rooms && bookingDraft.booking_rooms.length > 0
-          ? bookingDraft.booking_rooms.flatMap((br: any, brIdx: number) => {
-              const count = br.count || 1;
-              const res = [];
-              for (let c = 0; c < count; c++) {
-                res.push({
-                  booking_room_id: newId * 100 + brIdx * 10 + c + 1,
-                  room_types_id: br.room_type_id || 1,
-                  room_id: null,
-                  room_type_name: br.room_type_name || 'Phòng Homestay',
-                  room_number: null,
-                  base_price: br.price || 600000,
-                });
-              }
-              return res;
-            })
-          : [
-              {
-                booking_room_id: newId * 10 + 1,
-                room_types_id: bookingDraft.room_type_id || 1,
-                room_id: bookingDraft.room_id || null,
-                room_type_name: bookingDraft.room_type_name || 'Phòng Homestay',
-                room_number: bookingDraft.room_number || null,
-                base_price: bookingDraft.base_price || 600000,
-              },
-            ],
+        rooms: [
+          {
+            booking_room_id: newId * 10 + 1,
+            room_types_id: bookingDraft.room_type_id || 1,
+            room_id: bookingDraft.room_id || 1,
+            room_type_name: bookingDraft.room_type_name || 'Phòng Homestay',
+            room_number: bookingDraft.room_number || 'P101',
+            base_price: bookingDraft.base_price || 600000,
+          },
+        ],
         guests: (bookingDraft.guests || []).map((g: any, i: number) => ({
           id: newId * 10 + i + 1,
           full_name: g.full_name,
@@ -1203,7 +1309,10 @@ export const adminApi = {
     }
   },
 
-  hideRoomType: async (id: number, role: StaffRole) => {
+  deleteRoomType: async (id: number, role: StaffRole) => {
+    const res = await api.delete(`/admin/room-types/${id}`, getHeaders(role));
+    return res.data;
+  },  hideRoomType: async (id: number, role: StaffRole) => {
     try {
       const res = await api.post(`/admin/room-types/${id}/hide`, {}, getHeaders(role));
       return res.data;
@@ -1234,7 +1343,24 @@ export const adminApi = {
         return res.data as RoomItem[];
       }
     } catch {}
-    let list = getSimRooms();
+    let list = getSimRooms().filter(r => !r.deleted_at);
+    const groups = getSimRoomGroups();
+    const blocks = getSimRoomBlocks();
+    const bookings = getSimBookings();
+    const now = new Date();
+
+    list = list.map(r => {
+      const activeBlocks = blocks.filter(b => b.room_id === r.room_id && new Date(b.from_at) <= now && (!b.to_at || new Date(b.to_at) >= now));
+      const hasCheckedIn = bookings.some(bk => bk.booking_status === 'checked_in' && bk.rooms && bk.rooms.some(rm => rm.room_id === r.room_id));
+      const grp = groups.find(g => g.id === r.room_group_id);
+
+      return {
+        ...r,
+        room_group_name: grp ? grp.name : (r.room_group_name || null),
+        display_status: computeRoomDisplayStatus({ housekeeping: r.housekeeping }, activeBlocks, hasCheckedIn),
+      };
+    });
+
     if (filters?.apartment_id) {
       list = list.filter(r => r.apartment_id === Number(filters.apartment_id));
     }
@@ -1270,6 +1396,11 @@ export const adminApi = {
       const newRoom: RoomItem = {
         room_id: newId,
         room_number: data.room_number,
+        floor: Number((data as any).floor) || 1,
+        room_group_id: (data as any).room_group_id || null,
+        note: (data as any).note || null,
+        housekeeping: (data as any).housekeeping || 'clean',
+        deleted_at: null,
         apartment_id: Number(data.apartment_id),
         apartment_name: apt?.name || `Chi nhánh #${data.apartment_id}`,
         room_type_id: Number(data.room_type_id),
@@ -1318,6 +1449,11 @@ export const adminApi = {
           const newRoom: RoomItem = {
             room_id: currentMaxId,
             room_number: num,
+            floor: Number((item as any).floor) || 1,
+            room_group_id: (item as any).room_group_id || null,
+            note: (item as any).note || null,
+            housekeeping: (item as any).housekeeping || 'clean',
+            deleted_at: null,
             apartment_id: Number(data.apartment_id),
             apartment_name: apt?.name || `Chi nhánh #${data.apartment_id}`,
             room_type_id: Number(data.room_type_id),
@@ -1482,6 +1618,397 @@ export const adminApi = {
         { id: 10, lock_name: 'Khóa cửa thông minh T-10', lock_status: 'online', battery_level: 95 },
         { id: 11, lock_name: 'Khóa cửa thông minh T-11', lock_status: 'online', battery_level: 88 },
       ] as LockItem[];
+    }
+  },
+
+  deleteRoom: async (id: number, role: StaffRole) => {
+    try {
+      const res = await api.delete(`/admin/rooms/${id}`, getHeaders(role));
+      return res.data;
+    } catch {
+      const list = getSimRooms();
+      const bookings = getSimBookings();
+      const hasBooking = bookings.some(b => b.rooms && b.rooms.some(r => r.room_id === id));
+      if (hasBooking) {
+        throw new Error('Không thể xóa phòng đã từng có lịch sử đặt phòng. Vui lòng sử dụng tính năng ẩn phòng thay thế.');
+      }
+      const idx = list.findIndex(r => r.room_id === id);
+      if (idx !== -1) {
+        list[idx].deleted_at = new Date().toISOString();
+        saveSimRooms(list);
+      }
+      return { success: true, message: 'Đã xóa phòng thành công!' };
+    }
+  },
+
+  updateHousekeeping: async (id: number, housekeeping: 'clean' | 'dirty', role: StaffRole) => {
+    try {
+      const res = await api.put(`/admin/rooms/${id}/housekeeping`, { housekeeping }, getHeaders(role));
+      return res.data;
+    } catch {
+      const list = getSimRooms();
+      const idx = list.findIndex(r => r.room_id === id);
+      if (idx !== -1) {
+        list[idx].housekeeping = housekeeping;
+        saveSimRooms(list);
+      }
+      return { success: true, message: `Đã đổi tình trạng buồng phòng sang "${housekeeping === 'clean' ? 'Sạch' : 'Cần dọn'}"!` };
+    }
+  },
+
+  // Room Groups
+  getRoomGroups: async (role: StaffRole, onlyActive = false) => {
+    try {
+      const res = await api.get(`/admin/room-groups?onlyActive=${onlyActive ? '1' : '0'}`, getHeaders(role));
+      return res.data as RoomGroupItem[];
+    } catch {
+      let list = getSimRoomGroups();
+      if (onlyActive) list = list.filter(g => g.is_active);
+      return list;
+    }
+  },
+
+  createRoomGroup: async (data: { name: string }, role: StaffRole) => {
+    try {
+      const res = await api.post('/admin/room-groups', data, getHeaders(role));
+      return res.data;
+    } catch {
+      const list = getSimRoomGroups();
+      const newId = list.length > 0 ? Math.max(...list.map(g => Number(g.id)||0)) + 1 : 1;
+      const item: RoomGroupItem = { id: newId, name: data.name.trim(), is_active: true };
+      list.push(item);
+      saveSimRoomGroups(list);
+      return { success: true, id: newId, message: 'Tạo nhóm phòng thành công!' };
+    }
+  },
+
+  updateRoomGroup: async (id: number, name: string, role: StaffRole) => {
+    try {
+      const res = await api.put(`/admin/room-groups/${id}`, { name }, getHeaders(role));
+      return res.data;
+    } catch {
+      const list = getSimRoomGroups();
+      const idx = list.findIndex(g => g.id === id);
+      if (idx !== -1) {
+        list[idx].name = name.trim();
+        saveSimRoomGroups(list);
+      }
+      return { success: true, message: 'Cập nhật nhóm phòng thành công!' };
+    }
+  },
+
+  toggleRoomGroup: async (id: number, role: StaffRole) => {
+    try {
+      const res = await api.post(`/admin/room-groups/${id}/toggle`, {}, getHeaders(role));
+      return res.data;
+    } catch {
+      const list = getSimRoomGroups();
+      const idx = list.findIndex(g => g.id === id);
+      if (idx !== -1) {
+        list[idx].is_active = !list[idx].is_active;
+        saveSimRoomGroups(list);
+        return { success: true, is_active: list[idx].is_active, message: 'Đổi trạng thái nhóm thành công!' };
+      }
+      return { success: false, message: 'Không tìm thấy nhóm phòng' };
+    }
+  },
+
+  // Room Features
+  getRoomFeatures: async (role: StaffRole, onlyActive = false) => {
+    try {
+      const res = await api.get(`/admin/room-features?onlyActive=${onlyActive ? '1' : '0'}`, getHeaders(role));
+      return res.data as RoomFeatureItem[];
+    } catch {
+      let list = getSimRoomFeatures();
+      if (onlyActive) list = list.filter(f => f.is_active);
+      return list;
+    }
+  },
+
+  createRoomFeature: async (data: { name: string; category: 'view' | 'sunlight' | 'comfort' | 'amenity'; extra_price_per_night?: number }, role: StaffRole) => {
+    try {
+      const res = await api.post('/admin/room-features', data, getHeaders(role));
+      return res.data;
+    } catch {
+      const list = getSimRoomFeatures();
+      const newId = list.length > 0 ? Math.max(...list.map(f => f.id)) + 1 : 1;
+      const item: RoomFeatureItem = { id: newId, name: data.name.trim(), category: data.category, is_active: true };
+      list.push(item);
+      saveSimRoomFeatures(list);
+      return { success: true, id: newId, message: 'Tạo đặc điểm thành công!' };
+    }
+  },
+
+  updateRoomFeature: async (id: number, data: { name?: string; category?: any; extra_price_per_night?: number }, role: StaffRole) => {
+    try {
+      const res = await api.put(`/admin/room-features/${id}`, data, getHeaders(role));
+      return res.data;
+    } catch {
+      const list = getSimRoomFeatures();
+      const idx = list.findIndex(f => f.id === id);
+      if (idx !== -1) {
+        if (data.name) list[idx].name = data.name.trim();
+        if (data.category) list[idx].category = data.category;
+        saveSimRoomFeatures(list);
+      }
+      return { success: true, message: 'Cập nhật đặc điểm thành công!' };
+    }
+  },
+
+  toggleRoomFeature: async (id: number, role: StaffRole) => {
+    try {
+      const res = await api.post(`/admin/room-features/${id}/toggle`, {}, getHeaders(role));
+      return res.data;
+    } catch {
+      const list = getSimRoomFeatures();
+      const idx = list.findIndex(f => f.id === id);
+      if (idx !== -1) {
+        list[idx].is_active = !list[idx].is_active;
+        saveSimRoomFeatures(list);
+        return { success: true, is_active: list[idx].is_active, message: 'Đổi trạng thái đặc điểm thành công!' };
+      }
+      return { success: false, message: 'Không tìm thấy đặc điểm' };
+    }
+  },
+
+  // Room Blocks (Lịch bảo trì)
+  getRoomBlocks: async (roomId: number, role: StaffRole) => {
+    try {
+      const res = await api.get(`/admin/rooms/${roomId}/blocks`, getHeaders(role));
+      return res.data as RoomBlockItem[];
+    } catch {
+      return getSimRoomBlocks().filter(b => b.room_id === roomId);
+    }
+  },
+
+  createRoomBlock: async (roomId: number, data: { from_at: string; to_at?: string | null; reason: string; confirm?: boolean }, role: StaffRole) => {
+    try {
+      const res = await api.post(`/admin/rooms/${roomId}/blocks`, data, getHeaders(role));
+      return res.data;
+    } catch {
+      const list = getSimRoomBlocks();
+      const newId = list.length > 0 ? Math.max(...list.map(b => b.id)) + 1 : 1;
+      const item: RoomBlockItem = {
+        id: newId,
+        room_id: roomId,
+        from_at: data.from_at,
+        to_at: data.to_at || null,
+        reason: data.reason,
+        created_by: role,
+        created_at: new Date().toISOString(),
+      };
+      list.push(item);
+      saveSimRoomBlocks(list);
+
+      // Cập nhật status phòng thành maintenance nếu block có hiệu lực ngay bây giờ
+      const now = new Date();
+      const fromAt = new Date(data.from_at);
+      const toAt = data.to_at ? new Date(data.to_at) : null;
+      if (fromAt <= now && (!toAt || toAt >= now)) {
+        const rooms = getSimRooms();
+        const rIdx = rooms.findIndex(r => r.room_id === roomId);
+        if (rIdx !== -1) {
+          rooms[rIdx].status = 'maintenance';
+          saveSimRooms(rooms);
+        }
+      }
+      return { success: true, block_id: newId, message: 'Đã tạo lịch bảo trì!' };
+    }
+  },
+
+  deleteRoomBlock: async (roomId: number, blockId: number, role: StaffRole) => {
+    try {
+      const res = await api.delete(`/admin/rooms/${roomId}/blocks/${blockId}`, getHeaders(role));
+      return res.data;
+    } catch {
+      let list = getSimRoomBlocks();
+      list = list.filter(b => b.id !== blockId);
+      saveSimRoomBlocks(list);
+
+      // Kiểm tra còn block active không
+      const now = new Date();
+      const hasActive = list.some(b => b.room_id === roomId && new Date(b.from_at) <= now && (!b.to_at || new Date(b.to_at) >= now));
+      if (!hasActive) {
+        const rooms = getSimRooms();
+        const rIdx = rooms.findIndex(r => r.room_id === roomId);
+        if (rIdx !== -1 && rooms[rIdx].status === 'maintenance') {
+          rooms[rIdx].status = 'available';
+          saveSimRooms(rooms);
+        }
+      }
+      return { success: true, message: 'Đã gỡ lịch bảo trì!' };
+    }
+  },
+
+  // Bulk
+  bulkAssignFeatures: async (data: { room_ids: number[]; add_feature_ids?: number[]; remove_feature_ids?: number[] }, role: StaffRole) => {
+    try {
+      const res = await api.post('/admin/rooms/features/bulk', data, getHeaders(role));
+      return res.data;
+    } catch {
+      const rooms = getSimRooms();
+      rooms.forEach(r => {
+        if (data.room_ids.includes(r.room_id)) {
+          let fIds = r.feature_ids || [];
+          if (data.add_feature_ids) {
+            fIds = Array.from(new Set([...fIds, ...data.add_feature_ids]));
+          }
+          if (data.remove_feature_ids) {
+            fIds = fIds.filter(id => !data.remove_feature_ids!.includes(id));
+          }
+          r.feature_ids = fIds;
+        }
+      });
+      saveSimRooms(rooms);
+      return { success: true, count: data.room_ids.length, message: 'Gán đặc điểm hàng loạt thành công!' };
+    }
+  },
+
+  bulkAssignGroup: async (data: { room_ids: number[]; room_group_id: number | string | null }, role: StaffRole) => {
+    try {
+      const res = await api.post('/admin/rooms/groups/bulk', data, getHeaders(role));
+      return res.data;
+    } catch {
+      const rooms = getSimRooms();
+      const groups = getSimRoomGroups();
+      const grp = groups.find(g => g.id === data.room_group_id);
+      rooms.forEach(r => {
+        if (data.room_ids.includes(r.room_id)) {
+          r.room_group_id = data.room_group_id;
+          r.room_group_name = grp ? grp.name : null;
+        }
+      });
+      saveSimRooms(rooms);
+      return { success: true, count: data.room_ids.length, message: 'Gán nhóm phòng hàng loạt thành công!' };
+    }
+  },
+
+  // New Batch Create Rooms
+  newBatchCreateRooms: async (
+    data: {
+      apartment_id: number;
+      default_status?: 'available' | 'maintenance';
+      common_feature_ids?: number[];
+      groups: Array<{
+        label: string;
+        parentRoomTypeId?: number;
+        roomGroupId?: number | string | null;
+        roomTypeId: number;
+        featureIds?: number[];
+        note?: string;
+        roomNumbers: string[];
+      }>;
+      dry_run?: boolean;
+    },
+    role: StaffRole,
+  ) => {
+    try {
+      const url = `/admin/rooms/batch${data.dry_run ? '?dryRun=1' : ''}`;
+      const res = await api.post(url, data, getHeaders(role));
+      return res.data;
+    } catch {
+      const batchGroups = data.groups.map(g => ({
+        label: g.label || 'Nhóm',
+        roomGroupId: g.roomGroupId || null,
+        roomTypeId: g.roomTypeId,
+        featureIds: g.featureIds || [],
+        note: g.note || '',
+        roomNumbers: g.roomNumbers || [],
+      }));
+
+      const planResult = buildBatchPlan(batchGroups, {
+        defaultStatus: data.default_status || 'available',
+        commonFeatureIds: data.common_feature_ids || [],
+      });
+
+      const errors: Array<{ group: string; roomNumber: string; code: string; message: string }> = [];
+
+      for (const pe of planResult.errors) {
+        errors.push({ group: 'Cấu hình', roomNumber: '-', code: 'SYNTAX', message: pe });
+      }
+
+      for (const dup of planResult.duplicatesWithinBatch) {
+        errors.push({ group: 'Nhiều nhóm', roomNumber: dup, code: 'DUPLICATE_IN_BATCH', message: `Số phòng ${dup} bị trùng giữa các nhóm.` });
+      }
+
+      const simRooms = getSimRooms().filter(r => !r.deleted_at && r.apartment_id === Number(data.apartment_id));
+      const existing = new Set(simRooms.map(r => normalizeRoomNumber(r.room_number)));
+
+      for (const item of planResult.plan) {
+        if (existing.has(normalizeRoomNumber(item.roomNumber))) {
+          errors.push({ group: item.label, roomNumber: item.roomNumber, code: 'DUPLICATE_EXISTING', message: `Số phòng ${item.roomNumber} đã tồn tại ở chi nhánh này.` });
+        }
+      }
+
+      if (data.dry_run) {
+        return {
+          success: errors.length === 0,
+          totalPlanned: planResult.plan.length,
+          errors,
+          plan: planResult.plan,
+        };
+      }
+
+      if (errors.length > 0) {
+        throw new Error(errors.map(e => `${e.roomNumber}: ${e.message}`).join('\n'));
+      }
+
+      // Lưu sim rooms
+      const list = getSimRooms();
+      const branches = getSimBranches();
+      const rts = getSimRoomTypes();
+      const apt = branches.find(b => b.id === Number(data.apartment_id));
+      let currentMaxId = list.length > 0 ? Math.max(...list.map(r => r.room_id)) : 0;
+      const createdRooms: string[] = [];
+      const itemStatus = data.default_status || 'available';
+
+      for (const item of planResult.plan) {
+        currentMaxId += 1;
+        const rt = rts.find(r => r.id === item.roomTypeId);
+        const newRoom: RoomItem = {
+          room_id: currentMaxId,
+          room_number: item.roomNumber,
+          floor: item.floor ?? 0,
+          room_group_id: item.roomGroupId || null,
+          note: item.note || null,
+          housekeeping: 'clean',
+          deleted_at: null,
+          apartment_id: Number(data.apartment_id),
+          apartment_name: apt?.name || `Chi nhánh #${data.apartment_id}`,
+          room_type_id: item.roomTypeId,
+          room_type_name: rt?.name || 'Phòng tiêu chuẩn',
+          status: itemStatus,
+          feature_ids: item.featureIds,
+          is_hidden: false,
+          created_at: new Date().toISOString(),
+          is_ready_for_booking: itemStatus === 'available',
+        };
+        list.unshift(newRoom);
+        createdRooms.push(item.roomNumber);
+
+        if (itemStatus === 'maintenance') {
+          const blocks = getSimRoomBlocks();
+          const bId = blocks.length > 0 ? Math.max(...blocks.map(b => b.id)) + 1 : 1;
+          blocks.push({
+            id: bId,
+            room_id: currentMaxId,
+            from_at: new Date().toISOString(),
+            to_at: null,
+            reason: 'Khởi tạo bảo trì khi tạo hàng loạt',
+            created_by: role,
+            created_at: new Date().toISOString(),
+          });
+          saveSimRoomBlocks(blocks);
+        }
+      }
+
+      saveSimRooms(list);
+      return {
+        success: true,
+        createdCount: createdRooms.length,
+        createdRooms,
+        message: `Đã tạo thành công ${createdRooms.length} phòng mới!`,
+      };
     }
   },
 
@@ -1940,31 +2467,6 @@ export const adminApi = {
         saveSimBookings(list);
       }
       return { success: true, message: 'Đã check-out thành công!' };
-    }
-  },
-
-  cancelPaidBookingAndRefund: async (id: number, refundAmount: number, reason: string, role: StaffRole) => {
-    try {
-      const res = await api.post(`/admin/bookings/${id}/cancel-paid-refund`, { refund_amount: refundAmount, reason }, getHeaders(role));
-      return res.data;
-    } catch {
-      const list = getSimBookings();
-      const idx = list.findIndex(b => b.id === id);
-      if (idx !== -1) {
-        list[idx].booking_status = 'cancelled';
-        list[idx].cancel_reason = reason;
-        list[idx].cancelled_at = new Date().toISOString();
-        list[idx].refund_amount = refundAmount;
-        list[idx].transactions = [...(list[idx].transactions || []), {
-          id: Date.now(),
-          type: 'refund',
-          amount: refundAmount,
-          created_at: new Date().toISOString(),
-          note: reason,
-        }];
-        saveSimBookings(list);
-      }
-      return { success: true, message: `Đã ghi nhận hoàn tiền ${refundAmount.toLocaleString('vi-VN')}đ!` };
     }
   },
 
@@ -2635,6 +3137,12 @@ const mockAdminRooms: RoomItem[] = [
   {
     room_id: 1,
     room_number: 'P101',
+    floor: 1,
+    room_group_id: 1,
+    room_group_name: 'Phòng góc',
+    note: null,
+    housekeeping: 'clean',
+    deleted_at: null,
     apartment_id: 1,
     apartment_name: 'Chi nhánh 1 – Triền Núi Nhỏ',
     room_type_id: 1,
@@ -2652,6 +3160,12 @@ const mockAdminRooms: RoomItem[] = [
   {
     room_id: 2,
     room_number: 'P102',
+    floor: 1,
+    room_group_id: null,
+    room_group_name: null,
+    note: null,
+    housekeeping: 'clean',
+    deleted_at: null,
     apartment_id: 1,
     apartment_name: 'Chi nhánh 1 – Triền Núi Nhỏ',
     room_type_id: 1,
@@ -2668,6 +3182,12 @@ const mockAdminRooms: RoomItem[] = [
   {
     room_id: 3,
     room_number: 'P201',
+    floor: 2,
+    room_group_id: null,
+    room_group_name: null,
+    note: null,
+    housekeeping: 'clean',
+    deleted_at: null,
     apartment_id: 1,
     apartment_name: 'Chi nhánh 1 – Triền Núi Nhỏ',
     room_type_id: 2,
@@ -2681,3 +3201,23 @@ const mockAdminRooms: RoomItem[] = [
 
 export const adminService = adminApi;
 
+
+// Real room/feature management overrides; retain simulator helpers only for unrelated legacy screens.
+Object.assign(adminApi, {
+  getRooms: async (role:StaffRole,filters:any={}) => (await api.get('/admin/rooms',{...getHeaders(role),params:filters})).data,
+  deleteRoom: async (id:number,role:StaffRole) => (await api.delete(`/admin/rooms/${id}`,getHeaders(role))).data,
+  getRoomGroups: async (role: StaffRole, onlyActive=false) => (await api.get('/admin/room-groups', { ...getHeaders(role), params:{onlyActive:onlyActive?'1':'0'} })).data,
+  getRoomFeatures: async (role: StaffRole, onlyActive=false) => (await api.get('/admin/room-features', { ...getHeaders(role), params:{onlyActive:onlyActive?'1':'0'} })).data,
+  createRoomFeature: async (data:any,role:StaffRole) => (await api.post('/admin/room-features',data,getHeaders(role))).data,
+  updateRoomFeature: async (id:number,data:any,role:StaffRole) => (await api.put(`/admin/room-features/${id}`,data,getHeaders(role))).data,
+  toggleRoomFeature: async (id:number,role:StaffRole) => (await api.post(`/admin/room-features/${id}/toggle`,{},getHeaders(role))).data,
+  createRoom: async (data:any,role:StaffRole) => (await api.post('/admin/rooms',data,getHeaders(role))).data,
+  updateRoom: async (id:number,data:any,role:StaffRole) => (await api.put(`/admin/rooms/${id}`,data,getHeaders(role))).data,
+  newBatchCreateRooms: async (data:any,role:StaffRole) => (await api.post('/admin/rooms/batch-v2',data,getHeaders(role))).data,
+  bulkAssignFeatures: async (data:any,role:StaffRole) => (await api.post('/admin/rooms/features/bulk',data,getHeaders(role))).data,
+  bulkAssignGroup: async (data:any,role:StaffRole) => (await api.post('/admin/rooms/groups/bulk',data,getHeaders(role))).data,
+  getRoomBlocks: async (id:number,role:StaffRole) => (await api.get(`/admin/rooms/${id}/blocks`,getHeaders(role))).data,
+  createRoomBlock: async (id:number,data:any,role:StaffRole) => (await api.post(`/admin/rooms/${id}/blocks`,data,getHeaders(role))).data,
+  deleteRoomBlock: async (id:number,blockId:number,role:StaffRole) => (await api.delete(`/admin/rooms/${id}/blocks/${blockId}`,getHeaders(role))).data,
+  updateHousekeeping: async (id:number,state:string,role:StaffRole) => (await api.put(`/admin/rooms/${id}/housekeeping`,{housekeeping:state},getHeaders(role))).data,
+});

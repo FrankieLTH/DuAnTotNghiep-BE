@@ -2,7 +2,7 @@ import { Controller, Get, Post, Body, Query, Param, ParseIntPipe } from '@nestjs
 import { BookingWorkflowService } from './booking-workflow.service';
 import { SearchRoomsQueryDto, CreateDraftBookingDto } from '../../common/config/booking.config';
 
-@Controller('api/v1/booking-flow')
+@Controller('v1/booking-flow')
 export class BookingWorkflowController {
   constructor(private readonly workflowService: BookingWorkflowService) {}
 

@@ -169,7 +169,7 @@ const password = 'Qa-Original-2026';
   assert.equal((await api(`/bookings/${saved.booking_id}/requests`, { token: lookup.access_token })).find(r => r.id === refund2.id).status, 'processed');
   assert.equal((await api(`/bookings/${saved.booking_id}`, { token: lookup.access_token })).paid_amount, 0);
   const [tableCount] = await db.query("SELECT COUNT(*) AS n FROM information_schema.TABLES WHERE TABLE_SCHEMA=DATABASE() AND TABLE_TYPE='BASE TABLE'");
-  assert.equal(Number(tableCount.n), 24);
+  assert.equal(Number(tableCount.n), 25);
   const mailCount = mails.length;
   const repeatedRegistration = await api('/auth/register', { body: { email, full_name: 'Attempt to replace account', password: 'Other-password-2026' } });
   assert.equal(repeatedRegistration.next_action, 'login_or_reset', 'Existing account must not open an OTP form when no code is sent');

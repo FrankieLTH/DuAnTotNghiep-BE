@@ -54,6 +54,13 @@ export class RoomType {
   @Column('decimal', { precision: 12, scale: 2 })
   base_price: number;
 
+  @Column({ type: 'int', nullable: true })
+  parent_id: number | null;
+
+  @ManyToOne(() => RoomType, { nullable: true })
+  @JoinColumn({ name: 'parent_id' })
+  parent: RoomType | null;
+
   @Column()
   max_occupancy: number;
 
@@ -79,9 +86,13 @@ export class Room {
   @PrimaryGeneratedColumn({ name: 'room_id' })
   id: number;
 
-  // Keep the legacy property without mapping the same database column twice.
-  get room_id(): number { return this.id; }
-  set room_id(value: number) { this.id = value; }
+  get room_id(): number {
+    return this.id;
+  }
+
+  set room_id(value: number) {
+    this.id = value;
+  }
 
   @Column()
   apartment_id: number;
@@ -105,6 +116,27 @@ export class Room {
 
   @Column({ type: 'varchar', length: 500, nullable: true, comment: 'Mô tả đặc điểm đặc biệt của phòng (nhập tay, không ảnh hưởng giá)' })
   special_features?: string | null;
+
+  @Column({ default: 0 })
+  floor: number;
+
+  @Column({ type: 'varchar', length: 100, nullable: true })
+  room_group_name: string;
+
+  @Column({ type: 'text', nullable: true })
+  note: string;
+
+  @Column({ default: 'clean' })
+  housekeeping: 'clean' | 'dirty';
+
+  @Column({ type: 'datetime', nullable: true })
+  deleted_at: Date;
+
+  @Column({ type: 'json', nullable: true })
+  feature_ids: number[];
+
+  @Column({ type: 'json', nullable: true })
+  blocked_periods: { id: number; room_id: number; from_at: string; to_at: string | null; reason: string; created_by: string; created_at: string }[];
 
   @Column({ type: 'date', nullable: true })
   last_maintenance_date: string;
@@ -203,3 +235,15 @@ export class StayTypeConfig {
   price_factor: number;
 }
 
+
+@Entity('room_features')
+export class RoomFeature {
+  @PrimaryGeneratedColumn() id: number;
+  @Column({ unique: true, length: 100 }) name: string;
+  @Column({ length: 20 }) category: string;
+  @Column('decimal', { precision: 12, scale: 2, default: 0 }) extra_price_per_night: number;
+  @Column({ default: true }) is_active: boolean;
+  @CreateDateColumn() created_at: Date;
+}
+
+\n

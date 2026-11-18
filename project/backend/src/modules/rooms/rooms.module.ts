@@ -1,3 +1,4 @@
+import { RoomInventoryService } from './room-inventory.service';
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { RoomsService } from './rooms.service';
@@ -11,8 +12,8 @@ import { Apartment, RoomType, Room, Amenity, RoomImage, Service, StayTypeConfig 
   imports: [
     TypeOrmModule.forFeature([Apartment, RoomType, Room, Amenity, RoomImage, Service, StayTypeConfig]),
   ],
-  providers: [RoomsService, AvailabilityService, RecommendationService, BasketService],
+  providers: [RoomInventoryService,RoomsService, AvailabilityService, RecommendationService, BasketService],
   controllers: [RoomsController],
-  exports: [RoomsService, AvailabilityService, RecommendationService, BasketService],
+  exports: [RoomInventoryService,RoomsService, AvailabilityService, RecommendationService, BasketService],
 })
 export class RoomsModule {}
