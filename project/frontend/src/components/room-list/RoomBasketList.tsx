@@ -147,8 +147,8 @@ export const RoomBasketList: React.FC<RoomBasketListProps> = ({
         const results = await Promise.all(typeIds.map(async id => {
           try {
             const options = await getRoomTypeOptions(id, criteria.checkIn, criteria.checkOut, 1, { stayType: criteria.stayType, children: criteria.children, rooms: criteria.rooms });
-            return [id, options] as const;
-          } catch { return [id, []] as const; }
+            return [id, options] as [number, RoomTypeOption[]];
+          } catch { return [id, []] as [number, RoomTypeOption[]]; }
         }));
         if (isCancelled) return;
         const byType = new Map<number, RoomTypeOption[]>(results);
