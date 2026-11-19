@@ -100,7 +100,7 @@ export class PaymentsService {
     });
     if (!payment) return { booking_id: bookingId, amount: 0, status: 'paid', wallet_used: 0 };
     if (payment.provider_data.checkout_url) return this.view(payment);
-    const origin = new URL(this.config.get<string>('FRONTEND_URL', 'http://localhost:5174')).origin;
+    const origin = this.getFrontendOrigin();
     const path = `${origin}/tra-cuu/don/${bookingId}`;
     // Repeating the same attempt uses the same order code, including after a network timeout.
     let link: any;
@@ -212,8 +212,18 @@ export class PaymentsService {
     });
     // Email is a notification after commit; an SMTP failure can never roll back or duplicate money.
     if (receipt) {
-      try { await this.mail.send(receipt.to, `Đã nhận thanh toán · ${receipt.code}`, `Đồi Bông Gòn đã nhận thanh toán ${receipt.amount.toLocaleString('vi-VN')} đ cho đơn ${receipt.code}. ${receipt.review ? 'Đơn cần homestay kiểm tra lại tình trạng giữ phòng. Vui lòng liên hệ hỗ trợ.' : 'Đơn đặt phòng đã được xác nhận.'} Tra cứu thông tin tại ${new URL(this.config.get<string>('FRONTEND_URL', 'http://localhost:5174')).origin}/tra-cuu. Mã vào cửa chỉ hiển thị khi đủ điều kiện lưu trú.`); }
+      try { await this.mail.send(receipt.to, `Đã nhận thanh toán · ${receipt.code}`, `Đồi Bông Gòn đã nhận thanh toán ${receipt.amount.toLocaleString('vi-VN')} đ cho đơn ${receipt.code}. ${receipt.review ? 'Đơn cần homestay kiểm tra lại tình trạng giữ phòng. Vui lòng liên hệ hỗ trợ.' : 'Đơn đặt phòng đã được xác nhận.'} Tra cứu thông tin tại ${this.getFrontendOrigin()}/tra-cuu. Mã vào cửa chỉ hiển thị khi đủ điều kiện lưu trú.`); }
       catch { this.log.warn(`Payment ${paymentId}: receipt email was not delivered; payment remains recorded.`); }
+    }
+  }
+
+  private getFrontendOrigin(): string {
+    const raw = this.config.get<string>('FRONTEND_URL', 'http://localhost:5174');
+    try {
+      const formatted = raw.startsWith('http://') || raw.startsWith('https://') ? raw : `https://${raw}`;
+      return new URL(formatted).origin;
+    } catch {
+      return 'http://localhost:5174';
     }
   }
 }

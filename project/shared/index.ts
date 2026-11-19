@@ -33,3 +33,4 @@ export type {
 export { normalizeRoomNumber, suggestFloor, parseRoomNumberInput, generateRoomNumbers, buildBatchPlan, computeRoomDisplayStatus, aggregateRoomTypeFeatures } from './rooms';
 
 export type { BatchRoomGroup, BatchRoomPlan } from './rooms';
+
