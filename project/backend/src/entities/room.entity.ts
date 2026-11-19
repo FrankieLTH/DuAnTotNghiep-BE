@@ -245,5 +245,3 @@ export class RoomFeature {
   @Column({ default: true }) is_active: boolean;
   @CreateDateColumn() created_at: Date;
 }
-
-\n
