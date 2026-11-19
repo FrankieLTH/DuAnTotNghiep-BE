@@ -210,7 +210,7 @@ export interface RoomTypeItem {
   created_at: string;
   total_rooms: number;
   active_rooms: number;
-  images?: string[];
+  images?: Array<string | { id?: number; image_url: string; sort_order?: number }>;
   variants?: Array<{
     id: number;
     parent_id: number;
@@ -1888,6 +1888,7 @@ export const adminApi = {
     data: {
       apartment_id: number;
       default_status?: 'available' | 'maintenance';
+      initial_block_reason?: string;
       common_feature_ids?: number[];
       groups: Array<{
         label: string;
