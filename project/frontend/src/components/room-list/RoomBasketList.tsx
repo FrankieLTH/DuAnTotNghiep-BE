@@ -115,7 +115,7 @@ export const RoomBasketList: React.FC<RoomBasketListProps> = ({
     if (assignable) for (let i = 0; i < criteria.children; i++) expanded[i % Math.max(1, expanded.length)].guests.children += 1;
     let slot = 0;
     const allocatedItems = enrichedItems.map(item => ({ ...item, guests: assignable ? Array.from({ length: item.quantity }, () => expanded[slot++].guests) : [] }));
-    const tags = basket.tags.filter(tag => tag !== 'exact_fit');
+    const tags: Basket['tags'] = basket.tags.filter(tag => tag !== 'exact_fit');
     if (totalRooms > 0 && spare === 0) tags.push('exact_fit');
 
     return {
