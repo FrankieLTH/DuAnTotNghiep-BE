@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import * as dayjs from 'dayjs';
+import dayjs from 'dayjs';
 import { Booking, Payment, Refund, Lock, LockPin } from '../../entities/booking.entity';
 import { Room, Apartment } from '../../entities/room.entity';
 import { User } from '../../entities/user.entity';

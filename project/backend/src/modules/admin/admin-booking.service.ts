@@ -13,7 +13,7 @@ import {
   ConflictException,
 } from '@nestjs/common';
 import { DataSource } from 'typeorm';
-import * as dayjs from 'dayjs';
+import dayjs from 'dayjs';
 import {
   BookingStatus,
   BookingType,
