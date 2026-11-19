@@ -1039,7 +1039,9 @@ export const RoomsScreen: React.FC<RoomsScreenProps> = ({
                                     room_type_id: r.room_type_id,
                                     room_type_parent_id: roomTypes.find(parent => (parent.variants || []).some(variant => variant.id === r.room_type_id))?.id || 0,
                                     room_number: r.room_number,
+                                    room_quantity: 1,
                                     floor: r.floor ?? suggestFloor(r.room_number) ?? 1,
+                                    
                                     note: r.note || '',
                                     status: (r.status as any) || 'available',
                                     initial_block_reason: '',
