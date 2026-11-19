@@ -18,9 +18,11 @@ import { AdminRoomService } from './admin-room.service';
 import { RealtimeSyncService } from './realtime-sync.service';
 import { BookingStateMachineService } from './booking-state-machine.service';
 import { PermissionsGuard } from '../../common/guards/permissions.guard';
+import { InfrastructureModule } from '../../common/infrastructure/infrastructure.module';
 
 @Module({
   imports: [
+    InfrastructureModule,
     TypeOrmModule.forFeature([
       Booking,
       Payment,

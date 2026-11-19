@@ -112,7 +112,7 @@ export class BookingStateMachineService {
       }
 
       // 5. Phát sự kiện Realtime Sync sau khi commit (Zero PII payload)
-      this.realtimeSyncService.emitPostCommit(REALTIME_EVENTS.BOOKING_UPDATED, bookingId, {
+      await this.realtimeSyncService.emitPostCommit(REALTIME_EVENTS.BOOKING_UPDATED, bookingId, {
         apartment_id: booking.apartment_id,
         customer_id: booking.customer_id,
       });
@@ -124,7 +124,7 @@ export class BookingStateMachineService {
         targetStatus === BookingStatus.EXPIRED ||
         targetStatus === BookingStatus.CHECKED_OUT
       ) {
-        this.realtimeSyncService.emitPostCommit(REALTIME_EVENTS.AVAILABILITY_CHANGED, booking.apartment_id, {
+        await this.realtimeSyncService.emitPostCommit(REALTIME_EVENTS.AVAILABILITY_CHANGED, booking.apartment_id, {
           apartment_id: booking.apartment_id,
         });
       }

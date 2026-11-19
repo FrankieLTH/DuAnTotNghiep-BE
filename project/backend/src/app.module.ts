@@ -3,6 +3,8 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { ScheduleModule } from '@nestjs/schedule';
 import { EventEmitterModule } from '@nestjs/event-emitter';
+import { databaseConnection, initializeDatabase } from './common/config/database.config';
+import { InfrastructureModule } from './common/infrastructure/infrastructure.module';
 
 import { Role, User, Staff, Customer } from './entities/user.entity';
 import { Apartment, RoomType, Room, Amenity, RoomImage, Service, RoomFeature } from './entities/room.entity';
@@ -42,12 +44,7 @@ import { CronModule } from './modules/cron/cron.module';
       imports: [ConfigModule],
       inject: [ConfigService],
       useFactory: (config: ConfigService) => ({
-        type: 'mysql',
-        host: config.get<string>('DB_HOST', 'localhost'),
-        port: config.get<number>('DB_PORT', 3306),
-        username: config.get<string>('DB_USERNAME', 'root'),
-        password: config.get<string>('DB_PASSWORD', ''),
-        database: config.get<string>('DB_DATABASE', 'duantotnghiep'),
+        ...databaseConnection(config),
         entities: [
           Role, User, Staff, Customer, Apartment, RoomType, Room, Amenity, RoomImage, Service, RoomFeature,
           Lock, Voucher, Booking, BookingGuest, BookingRoom, Transaction, AuditLog, LockPin, PaymentMethod, Payment, Refund, AIChatLog
@@ -55,9 +52,12 @@ import { CronModule } from './modules/cron/cron.module';
         synchronize: false, // Dùng schema MySQL có sẵn
         logging: false,
       }),
+      dataSourceFactory: initializeDatabase,
     }),
 
-    ScheduleModule.forRoot(),
+    InfrastructureModule,
+    // Vercel Schedules invokes protected routes; local Docker keeps Nest timers.
+    ...(process.env.VERCEL === '1' ? [] : [ScheduleModule.forRoot()]),
     EventEmitterModule.forRoot(),
 
     AuthModule,

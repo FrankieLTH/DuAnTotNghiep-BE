@@ -22,6 +22,7 @@ class RealtimeSyncManager {
   private lastTimestamp: string = new Date().toISOString();
   private apartmentId?: number;
   private customerId?: number;
+  private readonly seenEvents = new Set<string>();
 
   /**
    * Khởi động kết nối Realtime (Ưu tiên SSE, fallback sang Polling nếu mạng chặn)
@@ -56,7 +57,8 @@ class RealtimeSyncManager {
     this.pollingTimer = setInterval(async () => {
       try {
         const queryParams = new URLSearchParams();
-        queryParams.set('since', this.lastTimestamp);
+        // Overlap catches events with the same timestamp or delayed Redis writes.
+        queryParams.set('since', new Date(Date.parse(this.lastTimestamp) - 60000).toISOString());
         if (this.apartmentId) queryParams.set('apartment_id', String(this.apartmentId));
         if (this.customerId) queryParams.set('customer_id', String(this.customerId));
 
@@ -68,7 +70,10 @@ class RealtimeSyncManager {
           const events: RealtimeMessage[] = await res.json();
           if (Array.isArray(events)) {
             for (const ev of events) {
-              this.lastTimestamp = ev.timestamp;
+              if (this.seenEvents.has(ev.id)) continue;
+              this.seenEvents.add(ev.id);
+              if (this.seenEvents.size > 500) this.seenEvents.delete(this.seenEvents.values().next().value!);
+              if (ev.timestamp > this.lastTimestamp) this.lastTimestamp = ev.timestamp;
               this.notifyListeners(ev);
             }
           }

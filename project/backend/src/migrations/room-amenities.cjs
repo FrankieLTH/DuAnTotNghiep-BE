@@ -4,7 +4,7 @@ require('dotenv').config({quiet:true});
 const mysql=require('mysql2/promise');
 
 async function main(){
-  const db=await mysql.createConnection({host:process.env.DB_HOST,port:Number(process.env.DB_PORT||3306),user:process.env.DB_USERNAME,password:process.env.DB_PASSWORD,database:process.env.DB_DATABASE});
+  const db=await require('./connection.cjs').connect();
   try{
     const [[done]]=await db.query("SELECT id FROM AUDIT_LOGS WHERE action='SEED_ROOM_AMENITIES_V1' LIMIT 1");
     if(done)return;

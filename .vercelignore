@@ -1,0 +1,14 @@
+.git
+**/node_modules
+**/dist
+**/.env
+**/.env.*
+!**/.env.example
+tmp
+temp
+db
+database
+figma
+logo
+**/*.log
+**/*.tsbuildinfo

@@ -3,10 +3,11 @@
 // Phát sự kiện post-commit: ID-only payload (Zero PII leak)
 // ============================================================================
 
-import { Injectable, Logger } from '@nestjs/common';
-import { Subject, Observable } from 'rxjs';
-import { filter, map } from 'rxjs/operators';
+import { Injectable, Logger, ServiceUnavailableException } from '@nestjs/common';
+import { Subject, Observable, defer, timer } from 'rxjs';
+import { filter, map, exhaustMap, mergeMap } from 'rxjs/operators';
 import { REALTIME_EVENTS, RealtimeEventType } from '@shared/index';
+import { RedisService } from '../../common/infrastructure/redis.service';
 
 export interface DomainEvent {
   id: string;
@@ -23,16 +24,17 @@ export class RealtimeSyncService {
   private readonly eventBus$ = new Subject<DomainEvent>();
   private readonly eventHistory: DomainEvent[] = [];
   private readonly MAX_HISTORY = 200;
+  constructor(private readonly redis: RedisService) {}
 
   /**
    * Phát sự kiện miền sau khi database transaction commit thành công.
    * Payload chỉ chứa ID và event type để bảo vệ dữ liệu cá nhân (Không chứa PII).
    */
-  emitPostCommit(
+  async emitPostCommit(
     type: RealtimeEventType,
     entityId: number,
     options?: { apartment_id?: number | null; customer_id?: number | null }
-  ): void {
+  ): Promise<void> {
     const event: DomainEvent = {
       id: `${Date.now()}-${Math.random().toString(36).substring(2, 9)}`,
       type,
@@ -47,6 +49,18 @@ export class RealtimeSyncService {
       this.eventHistory.shift();
     }
 
+    if (this.redis.shared) {
+      try {
+        const key = this.redis.key('realtime:history');
+        const results = await this.redis.client.multi()
+          .lpush(key, JSON.stringify(event)).ltrim(key, 0, this.MAX_HISTORY - 1).expire(key, 3600).exec();
+        if (!results || results.some(([error]) => error)) throw new Error('Redis write failed');
+      } catch {
+        // Booking writes have already committed. Never report them as rolled back.
+        this.logger.warn('Could not persist realtime event; clients can refresh to reload current data.');
+      }
+    }
+
     this.logger.log(`[Realtime Event Emitted] ${event.type} -> entity_id: ${entityId}, apt: ${event.apartment_id}, cust: ${event.customer_id}`);
     this.eventBus$.next(event);
   }
@@ -59,27 +73,24 @@ export class RealtimeSyncService {
     customer_id?: number;
     isStaff?: boolean;
   }): Observable<{ data: DomainEvent }> {
+    if (this.redis.shared) {
+      return defer(() => {
+        const seen = new Set<string>();
+        let since = new Date().toISOString();
+        return timer(0, 2000).pipe(
+          exhaustMap(() => this.readHistory(new Date(Date.parse(since) - 60000).toISOString())),
+          mergeMap(events => events.filter(event => {
+            if (seen.has(event.id)) return false;
+            seen.add(event.id);
+            if (seen.size > 500) seen.delete(seen.values().next().value);
+            if (event.timestamp > since) since = event.timestamp;
+            return this.visibleTo(event, filters);
+          }).map(data => ({ data }))),
+        );
+      });
+    }
     return this.eventBus$.pipe(
-      filter((ev) => {
-        // Staff nhận mọi event hoặc theo apartment_id của staff
-        if (filters?.isStaff) {
-          if (!filters.apartment_id) return true; // Admin thấy tất cả
-          return !ev.apartment_id || ev.apartment_id === filters.apartment_id;
-        }
-
-        // Kênh công khai: Catalog và Availability theo chi nhánh
-        if (ev.type === REALTIME_EVENTS.AVAILABILITY_CHANGED || ev.type === REALTIME_EVENTS.CATALOG_CHANGED) {
-          if (!filters?.apartment_id) return true;
-          return !ev.apartment_id || ev.apartment_id === filters.apartment_id;
-        }
-
-        // Kênh riêng tư khách hàng: Booking & Customer profile
-        if (filters?.customer_id && ev.customer_id) {
-          return ev.customer_id === filters.customer_id;
-        }
-
-        return false;
-      }),
+      filter(ev => this.visibleTo(ev, filters)),
       map((data) => ({ data }))
     );
   }
@@ -87,21 +98,31 @@ export class RealtimeSyncService {
   /**
    * Fallback Polling endpoint cho client khi SSE gặp sự cố mạng (HTTP GET /api/events/poll)
    */
-  pollEvents(sinceTimestamp?: string, apartment_id?: number, customer_id?: number, isStaff = false): DomainEvent[] {
-    let list = this.eventHistory;
-    if (sinceTimestamp) {
-      const sinceTime = new Date(sinceTimestamp).getTime();
-      list = list.filter((e) => new Date(e.timestamp).getTime() > sinceTime);
-    }
+  async pollEvents(sinceTimestamp?: string, apartment_id?: number, customer_id?: number, isStaff = false): Promise<DomainEvent[]> {
+    if (!isStaff) return [];
+    const list = await this.readHistory(sinceTimestamp);
+    return list.filter(ev => this.visibleTo(ev, { apartment_id, customer_id, isStaff }));
+  }
 
-    return list.filter((ev) => {
-      if (!isStaff) return false;
-      if (customer_id && ev.customer_id === customer_id) return true;
-      if (ev.type === REALTIME_EVENTS.AVAILABILITY_CHANGED || ev.type === REALTIME_EVENTS.CATALOG_CHANGED) {
-        if (!apartment_id) return true;
-        return !ev.apartment_id || ev.apartment_id === apartment_id;
+  private async readHistory(sinceTimestamp?: string): Promise<DomainEvent[]> {
+    let list = this.eventHistory;
+    if (this.redis.shared) {
+      try {
+        list = (await this.redis.client.lrange(this.redis.key('realtime:history'), 0, this.MAX_HISTORY - 1))
+          .map(raw => JSON.parse(raw) as DomainEvent);
+      } catch {
+        throw new ServiceUnavailableException('Không đọc được sự kiện realtime.');
       }
-      return false;
-    });
+    }
+    const since = sinceTimestamp ? Date.parse(sinceTimestamp) : 0;
+    return list.filter(event => Date.parse(event.timestamp) > since)
+      .sort((a, b) => a.timestamp.localeCompare(b.timestamp) || a.id.localeCompare(b.id));
+  }
+
+  private visibleTo(ev: DomainEvent, filters?: { apartment_id?: number; customer_id?: number; isStaff?: boolean }): boolean {
+    if (filters?.apartment_id && ev.apartment_id && ev.apartment_id !== filters.apartment_id) return false;
+    const catalog = ev.type === REALTIME_EVENTS.AVAILABILITY_CHANGED || ev.type === REALTIME_EVENTS.CATALOG_CHANGED;
+    if (filters?.isStaff) return !filters.customer_id || catalog || ev.customer_id === filters.customer_id;
+    return catalog || Boolean(filters?.customer_id && ev.customer_id === filters.customer_id);
   }
 }

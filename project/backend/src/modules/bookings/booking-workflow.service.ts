@@ -1,6 +1,6 @@
 import { Injectable, BadRequestException } from '@nestjs/common';
 import { DataSource } from 'typeorm';
-import * as dayjs from 'dayjs';
+import dayjs from 'dayjs';
 import { BOOKING_TIME_CONFIG, SearchRoomsQueryDto, CreateDraftBookingDto } from '../../common/config/booking.config';
 import { AvailabilityService } from '../rooms/availability.service';
 

@@ -2,7 +2,7 @@
 require('dotenv').config({ quiet: true });
 const mysql = require('mysql2/promise');
 (async () => {
-  const db = await mysql.createConnection({ host: process.env.DB_HOST, port: Number(process.env.DB_PORT || 3306), user: process.env.DB_USERNAME, password: process.env.DB_PASSWORD, database: process.env.DB_DATABASE });
+  const db = await require('./connection.cjs').connect();
   try {
     const [columns] = await db.query('SHOW COLUMNS FROM CUSTOMER');
     const existing = new Set(columns.map(column => column.Field));

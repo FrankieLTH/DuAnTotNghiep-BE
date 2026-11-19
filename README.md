@@ -1,89 +1,80 @@
 # DuAnTotNghiep - Homestay Automated Booking & Self Check-in System
 
-Hệ thống Đặt phòng Homestay & Tự động hoá quy trình Check-in / Check-out qua khoá thông minh TTLock, cổng thanh toán PayOS và WebSockets thời gian thực.
+Hệ thống đặt phòng Homestay và tự động hóa quy trình check-in / check-out, tích hợp khóa TTLock, thanh toán PayOS và cập nhật thời gian thực.
 
----
-
-## 📁 Cấu trúc Thư mục
+## Cấu trúc thư mục
 
 ```text
 .
-├── figma/              # Thư mục lưu tài nguyên thiết kế UI/UX Figma
-├── logo/               # Thư mục lưu trữ Logo & hình ảnh nhận diện thương hiệu
-├── docker-compose.yml  # File chạy PostgreSQL & Redis dev local
+├── docker-compose.yml       # MySQL, Redis, backend, frontend cho local
+├── vercel.json              # Frontend/backend Services và Schedules trên Vercel
+├── .env.vercel.example      # Biến môi trường cloud; tách khỏi Docker .env
+├── .dockerignore            # Lọc build context tại thư mục gốc
+├── .env.example             # Mẫu biến môi trường cho Docker Compose
+├── start-duanmoi.ps1        # Kiểm tra cấu hình, build và chạy trên Windows
+├── docker/
+│   ├── backend.Dockerfile
+│   ├── frontend.Dockerfile
+│   └── backend-entrypoint.sh # Khởi tạo DB, chạy migration rồi khởi động API
 ├── project/
-│   ├── backend/        # NestJS TypeScript App (API + Webhooks + TTLock Automation + PayOS)
-│   └── frontend/       # React + TypeScript + Vite (Dashboard & Booking Page)
-└── README.md
+│   ├── backend/             # NestJS API; .env.example ở đây dành cho chạy trực tiếp
+│   ├── frontend/            # React + TypeScript + Vite
+│   └── shared/              # Kiểu dữ liệu và hàm dùng chung
+├── database/                # Schema và dữ liệu danh mục hiện tại
+├── db/                      # SQL cũ; không dùng để khởi tạo stack Docker này
+├── docs/
+├── figma/
+└── logo/
 ```
 
----
+## Deploy lên Vercel
 
-## 🚀 Hướng dẫn Khởi chạy Môi trường Dev
+Frontend và backend deploy cùng một Vercel Project bằng Services. Dùng MySQL/Redis bên ngoài và Vercel Schedules phù hợp gói Hobby; xem từng bước tại [VERCEL.md](VERCEL.md). Docker local vẫn chạy độc lập theo hướng dẫn dưới đây.
 
-### 1. Khởi chạy Database (PostgreSQL) & Redis
-Trước khi chạy Backend, hãy đảm bảo Docker đã được bật và chạy lệnh:
-```bash
-docker compose up -d
+## Chạy bằng Docker trên Windows
+
+Bật Docker Desktop và mở PowerShell tại thư mục gốc dự án:
+
+```powershell
+Copy-Item .env.example .env
 ```
-- **PostgreSQL**: `localhost:5432` (User: `postgres`, Password: `postgrespassword`, DB: `homestay_db`)
-- **Redis**: `localhost:6379`
 
----
+Điền `JWT_SECRET` bằng chuỗi ngẫu nhiên dài, `DUANMOI_SMTP_USER` bằng tài khoản SMTP và `DUANMOI_SMTP_PASS` bằng mật khẩu ứng dụng trong `.env`, rồi chạy:
 
-### 2. Cấu hình & Chạy Backend (NestJS)
-```bash
-cd project/backend
-
-# Tạo file .env từ .env.example
-cp .env.example .env
-
-# Cài đặt gói phụ thuộc (nếu chưa cài)
-npm install
-
-# Khởi chạy Backend ở chế độ Dev
-npm run start:dev
+```powershell
+.\start-duanmoi.ps1
 ```
-Backend sẽ khởi chạy tại: `http://localhost:3000`
 
----
+Script kiểm tra cấu hình trước khi build. Docker Compose tự đọc `.env` ở gốc; không cần tạo `project/backend/.env` khi chạy Docker. Các khóa PayOS được cấu hình bằng `DUANMOI_PAYOS_*` trong cùng file.
 
-### 3. Khởi chạy Frontend (React + Vite)
-Mở một cửa sổ Terminal mới:
-```bash
-cd project/frontend
+| Dịch vụ | Địa chỉ trên máy local |
+| --- | --- |
+| Website | http://localhost:5174 |
+| Quản trị | http://localhost:5174/admin |
+| API | http://localhost:3001/api |
+| MySQL | `127.0.0.1:3307`, database/user `duanmoi`, password `duanmoi_local` |
+| Redis | `127.0.0.1:6380` |
 
-# Cài đặt gói phụ thuộc (nếu chưa cài)
-npm install
+Trong mạng Docker, backend kết nối `mysql:3306`, `redis:6379`; frontend chuyển tiếp `/api` và `/socket.io` đến `backend:3000`.
 
-# Khởi chạy Frontend ở chế độ Dev
-npm run dev
+Có thể chạy thủ công từ thư mục gốc sau khi đã điền `.env`:
+
+```powershell
+docker compose config --quiet
+docker compose up -d --build --wait --wait-timeout 180
+docker compose logs --tail 100 backend frontend
 ```
-Frontend sẽ khởi chạy tại: `http://localhost:5173`
 
----
+Build context của cả hai image là thư mục gốc để truy cập được `project/shared`. `.dockerignore` loại bỏ dependency local, build cũ, biến môi trường và các thư mục ngoài mã ứng dụng.
 
-### 🌐 Cấu hình TTLock Callback Webhook qua Ngrok (Dev Local)
+Đây là stack phát triển local: backend chạy TypeScript, frontend chạy Vite dev server. Hướng dẫn vận hành và khởi tạo dữ liệu nằm trong [DOCKER-DUANMOI.md](DOCKER-DUANMOI.md).
 
-Vì TTLock Management Center (và cổng thanh toán PayOS) **bắt buộc Callback/Webhook URL phải là một tên miền Public (Domain có HTTPS/HTTP công khai)** và không nhận IP nội bộ (`localhost` hoặc `127.0.0.1`), nên khi lập trình ở máy local bạn cần dùng **Ngrok**:
+## Chạy trực tiếp ngoài Docker
 
-1. **Tải & cài đặt Ngrok** (nếu chưa có): https://ngrok.com/
-2. **Khởi chạy Ngrok tunnel trỏ tới cổng Backend NestJS (3000):**
-   ```bash
-   ngrok http 3000
-   ```
-3. Ngrok sẽ trả về một đường dẫn Public dạng: `https://xxxx-xxxx.ngrok-free.app`
-4. **Đăng ký Callback URL trong TTLock Management Center:**
-   - URL Callback: `https://xxxx-xxxx.ngrok-free.app/webhooks/ttlock/callback`
-   - Cổng HTTP Callback của TTLock sẽ gửi thông tin mở cửa dạng `application/x-www-form-urlencoded`. Backend NestJS sẽ phản hồi lại chuỗi thuần `"success"` theo đúng chuẩn yêu cầu của TTLock.
+File `project/backend/.env.example` dành riêng cho backend chạy trên máy host, dùng MySQL `127.0.0.1:3307` và Redis `127.0.0.1:6380`. Các script npm điều phối frontend/backend nằm tại `project/package.json`.
 
----
+Backend đã build chạy bằng `npm run start:prod`; frontend `npm run dev` dùng proxy đến API `localhost:3000`. Stack Docker dùng các đường dẫn và biến môi trường riêng được khai báo ở trên.
 
-## 🛠️ Lệnh Kiểm tra Endpoint Webhook TTLock (Curl)
-```bash
-curl -X POST http://localhost:3000/webhooks/ttlock/callback \
-  -H "Content-Type: application/x-www-form-urlencoded" \
-  -d "notifyType=1&lockId=12345&lockMac=AA:BB:CC:DD:EE:FF&records=[{\"lockDate\":1700000000}]"
-```
-Phản hồi thành công kỳ vọng: `success`
+## Callback TTLock
 
+Đường dẫn theo tiền tố API hiện tại là `/api/webhooks/ttlock/callback`. Khi dùng Docker, tunnel cần trỏ vào cổng host `3001`. Hiện `WebhooksModule` chưa được đăng ký trong `AppModule`; cần hoàn thiện bước này trước khi sử dụng callback.

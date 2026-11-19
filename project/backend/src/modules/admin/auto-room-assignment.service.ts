@@ -1,6 +1,6 @@
 import { Injectable, Logger, BadRequestException, ConflictException } from '@nestjs/common';
 import { DataSource } from 'typeorm';
-import * as dayjs from 'dayjs';
+import dayjs from 'dayjs';
 import { AuditLogService } from './audit-log.service';
 
 export interface EmergencyAlert {

@@ -4,9 +4,15 @@ require('dotenv').config({quiet:true});
 const mysql = require('mysql2/promise');
 
 async function main() {
-  const db = await mysql.createConnection({host:process.env.DB_HOST,port:Number(process.env.DB_PORT||3306),user:process.env.DB_USERNAME,password:process.env.DB_PASSWORD,database:process.env.DB_DATABASE});
+  const db = await require('./connection.cjs').connect();
   try {
     const [typeColumns] = await db.query('SHOW COLUMNS FROM room_types');
+    const [legacyFeatures] = await db.query("SHOW TABLES LIKE 'room_features'");
+    if (typeColumns.some(c => c.Field === 'parent_id') &&
+        !typeColumns.some(c => c.Field === 'variant_group') && !legacyFeatures.length) {
+      console.log('Room parent/variant model already migrated; keeping existing hierarchy.');
+      return;
+    }
     if (!typeColumns.some(c => c.Field === 'variant_group')) await db.query('ALTER TABLE room_types ADD COLUMN variant_group VARCHAR(120) NULL');
     if (!typeColumns.some(c => c.Field === 'variant_label')) await db.query("ALTER TABLE room_types ADD COLUMN variant_label VARCHAR(100) NOT NULL DEFAULT 'Tiêu chuẩn'");
     await db.query('UPDATE room_types SET variant_group=name WHERE variant_group IS NULL');

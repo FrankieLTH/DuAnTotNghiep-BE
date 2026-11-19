@@ -16,7 +16,7 @@ services:
     volumes:
       - mysql_data:/var/lib/mysql
     healthcheck:
-      test: ['CMD-SHELL', 'mysqladmin ping -h localhost -uroot -p"$$MYSQL_ROOT_PASSWORD" --silent']
+      test: ['CMD-SHELL', 'mysqladmin ping -h 127.0.0.1 -uroot -p"$$MYSQL_ROOT_PASSWORD" --silent']
       interval: 5s
       timeout: 5s
       retries: 30
@@ -28,13 +28,18 @@ services:
       - '127.0.0.1:6380:6379'
     volumes:
       - redis_data:/data
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 3s
+      retries: 10
 
   backend:
+    image: duanmoi-backend:latest
     build:
-      context: ./project
-      dockerfile: backend/Dockerfile
+      context: .
+      dockerfile: docker/backend.Dockerfile
     restart: unless-stopped
-    env_file: ./project/backend/.env
     environment:
       DB_HOST: mysql
       DB_PORT: 3306
@@ -44,6 +49,10 @@ services:
       REDIS_URL: redis://redis:6379
       PORT: 3000
       TZ: Asia/Ho_Chi_Minh
+      JWT_SECRET: ${JWT_SECRET:?Thieu JWT_SECRET trong .env o thu muc goc}
+      TTLOCK_CLIENT_ID: ${TTLOCK_CLIENT_ID:-}
+      TTLOCK_CLIENT_SECRET: ${TTLOCK_CLIENT_SECRET:-}
+      TTLOCK_CALLBACK_PATH: ${TTLOCK_CALLBACK_PATH:-/api/webhooks/ttlock/callback}
       FRONTEND_URL: ${DUANMOI_FRONTEND_URL:-http://localhost:5174}
       PAYOS_CLIENT_ID: ${DUANMOI_PAYOS_CLIENT_ID:-}
       PAYOS_API_KEY: ${DUANMOI_PAYOS_API_KEY:-}
@@ -60,7 +69,7 @@ services:
       mysql:
         condition: service_healthy
       redis:
-        condition: service_started
+        condition: service_healthy
     healthcheck:
       test: ['CMD', 'node', '-e', 'fetch("http://127.0.0.1:3000/api/apartments").then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))']
       interval: 10s
@@ -69,9 +78,10 @@ services:
       start_period: 45s
 
   frontend:
+    image: duanmoi-frontend:latest
     build:
-      context: ./project
-      dockerfile: frontend/Dockerfile
+      context: .
+      dockerfile: docker/frontend.Dockerfile
     restart: unless-stopped
     environment:
       VITE_API_URL: /api
@@ -81,6 +91,12 @@ services:
     depends_on:
       backend:
         condition: service_healthy
+    healthcheck:
+      test: ['CMD', 'node', '-e', 'fetch("http://127.0.0.1:5173").then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))']
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
 
 volumes:
   mysql_data:

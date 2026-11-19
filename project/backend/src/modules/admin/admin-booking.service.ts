@@ -13,7 +13,7 @@ import {
   ConflictException,
 } from '@nestjs/common';
 import { DataSource } from 'typeorm';
-import * as dayjs from 'dayjs';
+import dayjs from 'dayjs';
 import {
   BookingStatus,
   BookingType,
@@ -718,11 +718,11 @@ export class AdminBookingService {
     });
 
     // Thông báo realtime
-    this.realtimeSyncService.emitPostCommit(REALTIME_EVENTS.BOOKING_UPDATED, bookingId, {
+    await this.realtimeSyncService.emitPostCommit(REALTIME_EVENTS.BOOKING_UPDATED, bookingId, {
       apartment_id: dto.apartment_id,
       customer_id: customer.id,
     });
-    this.realtimeSyncService.emitPostCommit(REALTIME_EVENTS.AVAILABILITY_CHANGED, dto.apartment_id, {
+    await this.realtimeSyncService.emitPostCommit(REALTIME_EVENTS.AVAILABILITY_CHANGED, dto.apartment_id, {
       apartment_id: dto.apartment_id,
     });
 
@@ -764,7 +764,7 @@ export class AdminBookingService {
     await this.dataSource.query(`UPDATE BOOKINGS SET hold_expires_at = NULL WHERE id = ?`, [bookingId]);
 
     // 4. Phát sự kiện realtime
-    this.realtimeSyncService.emitPostCommit(REALTIME_EVENTS.BOOKING_UPDATED, bookingId, {
+    await this.realtimeSyncService.emitPostCommit(REALTIME_EVENTS.BOOKING_UPDATED, bookingId, {
       apartment_id: booking.apartment_id,
       customer_id: booking.customer_id,
     });
@@ -970,7 +970,7 @@ export class AdminBookingService {
       new_value: dto,
     });
 
-    this.realtimeSyncService.emitPostCommit(REALTIME_EVENTS.BOOKING_UPDATED, bookingId, {
+    await this.realtimeSyncService.emitPostCommit(REALTIME_EVENTS.BOOKING_UPDATED, bookingId, {
       apartment_id: booking.apartment_id,
       customer_id: booking.customer_id,
     });
@@ -1063,7 +1063,7 @@ export class AdminBookingService {
       new_value: { hold_expires_at: newHoldExpiresAt, extended_minutes: EXTENDED_HOLD_MINUTES },
     });
 
-    this.realtimeSyncService.emitPostCommit(REALTIME_EVENTS.BOOKING_UPDATED, bookingId, {
+    await this.realtimeSyncService.emitPostCommit(REALTIME_EVENTS.BOOKING_UPDATED, bookingId, {
       apartment_id: booking.apartment_id,
       customer_id: booking.customer_id,
     });

@@ -67,6 +67,7 @@ export class CronService {
       await this.adminBookingService.expireOverdueHolds();
     } catch (err: any) {
       this.logger.error(`Error in handleExpireOverdueHolds: ${err.message}`);
+      throw err;
     }
   }
 
@@ -80,19 +81,21 @@ export class CronService {
       await this.retentionService.runPhotoCleanupJob('system_cron_hourly');
     } catch (err: any) {
       this.logger.error(`Error in handlePhotoCleanupJob: ${err.message}`);
+      throw err;
     }
   }
 
   /**
    * 4. Ẩn danh hóa hồ sơ lưu trú sau 36 tháng kể từ check-out (chạy lúc 2:00 sáng mỗi ngày)
    */
-  @Cron('0 2 * * *')
+  @Cron('0 2 * * *', { timeZone: 'Asia/Ho_Chi_Minh' })
   async handleAnonymizationJob() {
     try {
       this.logger.log('Running 36-month PII anonymization job...');
       await this.retentionService.runAnonymizationJob('system_cron_nightly');
     } catch (err: any) {
       this.logger.error(`Error in handleAnonymizationJob: ${err.message}`);
+      throw err;
     }
   }
 }

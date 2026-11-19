@@ -1,0 +1,75 @@
+{
+    "$schema": "https://openapi.vercel.sh/vercel.json",
+    "framework": "services",
+    "services": {
+        "backend": {
+            "root": "project/backend",
+            "framework": "nestjs",
+            "entrypoint": "src/main.ts",
+            "installCommand": "npm ci",
+            "buildCommand": "npm run build",
+            "outputDirectory": "dist/backend",
+            "functions": {
+                "dist/backend/src/main.js": {
+                    "maxDuration": 300
+                }
+            }
+        },
+        "frontend": {
+            "root": "project/frontend",
+            "framework": "vite",
+            "installCommand": "npm ci",
+            "buildCommand": "npm run build",
+            "outputDirectory": "dist",
+            "rewrites": [
+                { "source": "/(.*)", "destination": "/index.html" }
+            ]
+        }
+    },
+    "rewrites": [
+        {
+            "source": "/api",
+            "destination": { "service": "backend" }
+        },
+        {
+            "source": "/api/(.*)",
+            "destination": {
+                "service": "backend"
+            }
+        },
+        {
+            "source": "/socket.io",
+            "destination": { "service": "backend" }
+        },
+        {
+            "source": "/socket.io/(.*)",
+            "destination": { "service": "backend" }
+        },
+        {
+            "source": "/(.*)",
+            "destination": {
+                "service": "frontend"
+            }
+        }
+    ],
+    "schedules": {
+        "booking-maintenance": {
+            "schedule": "*/15 * * * *",
+            "timezone": "Asia/Ho_Chi_Minh",
+            "path": "/api/internal/jobs/maintenance",
+            "requestMethod": "POST"
+        },
+        "photo-cleanup": {
+            "schedule": "0 * * * *",
+            "timezone": "Asia/Ho_Chi_Minh",
+            "path": "/api/internal/jobs/photo-cleanup",
+            "requestMethod": "POST"
+        },
+        "data-anonymization": {
+            "schedule": "0 2 * * *",
+            "timezone": "Asia/Ho_Chi_Minh",
+            "path": "/api/internal/jobs/anonymization",
+            "requestMethod": "POST"
+        }
+    }
+}

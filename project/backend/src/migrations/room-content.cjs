@@ -3,8 +3,10 @@
 require('dotenv').config({quiet:true});
 const mysql=require('mysql2/promise');
 async function main(){
-  const db=await mysql.createConnection({host:process.env.DB_HOST,port:Number(process.env.DB_PORT||3306),user:process.env.DB_USERNAME,password:process.env.DB_PASSWORD,database:process.env.DB_DATABASE});
+  const db=await require('./connection.cjs').connect();
   try{
+    const [columns]=await db.query("SHOW COLUMNS FROM room_types LIKE 'variant_label'");
+    if(!columns.length){console.log('Legacy room content already migrated.');return;}
     const [types]=await db.query('SELECT rt.id,rt.name,rt.description,rt.area,rt.max_occupancy,rt.bed_config,rt.variant_label,a.name AS apartment_name FROM room_types rt JOIN APARTMENT a ON a.id=rt.apartment_id');
     for(const type of types){
       const old=String(type.description||'').trim();
