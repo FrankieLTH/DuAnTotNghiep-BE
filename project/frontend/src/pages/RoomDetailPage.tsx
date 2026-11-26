@@ -319,7 +319,7 @@ export const RoomDetailPage: React.FC<RoomDetailPageProps> = ({
       service_total: 0,
       discount_amount: discountAmount,
       total_price: finalRoomPrice,
-      hold_expires_at: Date.now() + 30 * 60 * 1000,
+      hold_expires_at: Date.now() + 15 * 60 * 1000,
       status: 'pending_info',
       booker: {
         full_name: '',
@@ -570,12 +570,60 @@ export const RoomDetailPage: React.FC<RoomDetailPageProps> = ({
                     </div>
                     <div className="grid grid-cols-7 gap-1 text-center text-[10px] text-[#8C7A70]">{['T2', 'T3', 'T4', 'T5', 'T6', 'T7', 'CN'].map(d => <span key={d}>{d}</span>)}</div>
                     <div className="grid grid-cols-7 gap-1">
-                      {calendar?.days.map(day => {
-                        const inRange = checkInDate && checkOutDate && day.date >= checkInDate && day.date <= checkOutDate;
-                        const isEdge = day.date === checkInDate || day.date === checkOutDate;
-                        const disabled = day.status !== 'available';
-                        return <button key={day.date} type="button" disabled={disabled} title={disabled ? 'Hết phòng' : `Còn ${day.availableCount} phòng`} onClick={() => { if (!rangeAnchor || day.date <= rangeAnchor) { setRangeAnchor(day.date); setCheckInDate(day.date); setCheckOutDate(''); } else { setCheckOutDate(day.date); setRangeAnchor(''); } }} className={`rounded p-1 text-xs ${disabled ? 'bg-stone-100 text-stone-400' : isEdge ? 'bg-[#C85A32] text-white' : inRange ? 'bg-[#F3D9C4] text-[#7A4A22]' : 'bg-emerald-50 text-emerald-800 hover:bg-emerald-200'}`}>{Number(day.date.slice(-2))}</button>;
-                      })}
+                      {(() => {
+                        if (!calendar?.days?.length) return null;
+                        const firstDateStr = calendar.days[0].date;
+                        const [y, m, d] = firstDateStr.split('-').map(Number);
+                        const firstDayObj = new Date(y, m - 1, d);
+                        const offset = (firstDayObj.getDay() + 6) % 7;
+                        const todayStr = new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Bangkok' });
+
+                        return (
+                          <>
+                            {Array.from({ length: offset }).map((_, i) => (
+                              <span key={`empty-${i}`} className="p-1" />
+                            ))}
+                            {calendar.days.map(day => {
+                              const isPast = day.date < todayStr;
+                              const inRange = checkInDate && checkOutDate && day.date >= checkInDate && day.date <= checkOutDate;
+                              const isEdge = day.date === checkInDate || day.date === checkOutDate;
+                              const disabled = day.status !== 'available' || isPast;
+                              const title = isPast ? 'Ngày đã qua' : disabled ? 'Hết phòng' : `Còn ${day.availableCount} phòng`;
+
+                              return (
+                                <button
+                                  key={day.date}
+                                  type="button"
+                                  disabled={disabled}
+                                  title={title}
+                                  onClick={() => {
+                                    if (disabled) return;
+                                    if (!rangeAnchor || day.date <= rangeAnchor) {
+                                      setRangeAnchor(day.date);
+                                      setCheckInDate(day.date);
+                                      setCheckOutDate('');
+                                    } else {
+                                      setCheckOutDate(day.date);
+                                      setRangeAnchor('');
+                                    }
+                                  }}
+                                  className={`rounded p-1 text-xs transition-colors ${
+                                    disabled
+                                      ? 'bg-stone-100 text-stone-300 cursor-not-allowed line-through'
+                                      : isEdge
+                                      ? 'bg-[#C85A32] text-white font-bold'
+                                      : inRange
+                                      ? 'bg-[#F3D9C4] text-[#7A4A22]'
+                                      : 'bg-emerald-50 text-emerald-800 hover:bg-emerald-200'
+                                  }`}
+                                >
+                                  {Number(day.date.slice(-2))}
+                                </button>
+                              );
+                            })}
+                          </>
+                        );
+                      })()}
                     </div>
                     <p className="text-[11px] text-[#795341]">Bấm ngày nhận, rồi bấm ngày trả. Ngày xám = hết phòng.</p>
                   </div>

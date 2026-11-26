@@ -706,7 +706,7 @@ export const SearchResultPage: React.FC<SearchResultPageProps> = ({
       service_total: 0,
       discount_amount: basket.discountAmount || 0,
       total_price: basket.totalPrice,
-      hold_expires_at: Date.now() + 30 * 60 * 1000,
+      hold_expires_at: Date.now() + 15 * 60 * 1000,
       status: 'pending_info',
       booker: {
         full_name: '',

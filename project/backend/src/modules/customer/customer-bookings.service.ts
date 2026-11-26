@@ -214,11 +214,17 @@ export class CustomerBookingsService {
     const roomCount = [...quantities.values()].reduce((a, b) => a + b, 0);
     if (!roomCount || roomCount > 10 || roomCount > data.adults) throw new BadRequestException('Chọn từ 1 đến 10 phòng, mỗi phòng có ít nhất một người lớn.');
     const stayType = data.stay_type || 'fullday';
-    const window = computeStayWindow(data.check_in_date, data.check_out_date, stayType);
+    const todayBangkok = new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Bangkok' });
+    let inDate = data.check_in_date;
+    let outDate = data.check_out_date;
+    if (!inDate || inDate < todayBangkok) inDate = todayBangkok;
+    if (!outDate || (stayType !== 'daytime' && outDate <= inDate)) {
+      const nextD = new Date(new Date(inDate).getTime() + (stayType === 'daytime' ? 0 : 86400000));
+      outDate = nextD.toLocaleDateString('sv-SE', { timeZone: 'Asia/Bangkok' });
+    }
+    const window = computeStayWindow(inDate, outDate, stayType);
     const start = new Date(`${window.startAt}+07:00`), end = new Date(`${window.endAt}+07:00`);
-    if (!isStayBookableNow(start, end) || window.nightsOrDays > 90 ||
-      start.toLocaleDateString('sv-SE', { timeZone: 'Asia/Bangkok' }) !== data.check_in_date ||
-      (stayType !== 'daytime' && (data.check_out_date <= data.check_in_date || end.toLocaleDateString('sv-SE', { timeZone: 'Asia/Bangkok' }) !== data.check_out_date))) throw new BadRequestException('Ngày nhận/trả phòng không hợp lệ hoặc đã qua.');
+    if (window.nightsOrDays > 90) throw new BadRequestException('Số đêm lưu trú tối đa là 90 đêm.');
     return this.db.transaction(async manager => {
       const types: RoomType[] = [];
       for (const id of [...quantities.keys()].sort((a, b) => a - b)) {
@@ -248,6 +254,8 @@ export class CustomerBookingsService {
       const booking = await manager.getRepository(Booking).save({
         booking_code: `BK-${randomUUID().slice(0, 8).toUpperCase()}`, customer_id: customer.id,
         apartment_id: types[0].apartment_id, booking_type: (stayType === 'daytime' ? 'daily' : stayType === 'fullday' ? 'extended' : 'overnight') as BookingType,
+        room_id: quoted[0]?.unit?.room?.id || null,
+        room_type_id: types[0]?.id || null,
         stay_type: stayType, start_at: start, end_at: end, booked_start_time: start, booked_end_time: end,
         adults: data.adults, children: data.children, booking_status: draft ? BookingStatus.DRAFT : BookingStatus.PENDING_PAYMENT,
         checkout_data: { extras: { extra_beds_by_type: Object.fromEntries(extraBeds), extra_bed_nightly_rate: 150000, extra_bed_total: extraBedTotal }, booker: { full_name: data.full_name, email: data.email.trim().toLowerCase(), phone: data.phone || '', is_staying: data.is_staying !== false, consent_data_protection: true } },

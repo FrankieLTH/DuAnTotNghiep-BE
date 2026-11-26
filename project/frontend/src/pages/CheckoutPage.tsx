@@ -68,7 +68,7 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({
     service_total: 0,
     discount_amount: 0,
     total_price: 1100000,
-    hold_expires_at: Date.now() + 30 * 60 * 1000,
+    hold_expires_at: Date.now() + 15 * 60 * 1000,
     status: 'pending_info',
     booker: {
       full_name: '',
@@ -211,6 +211,7 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({
   // OTP Email Verification
   const [otpSent, setOtpSent] = useState(false);
   const [otpCode, setOtpCode] = useState('');
+  const [devOtp, setDevOtp] = useState<string | null>(null);
   const [emailVerified, setEmailVerified] = useState(false);
   const [bookingScope, setBookingScope] = useState<'account' | 'lookup'>(bookingData?.customer_scope || 'lookup');
   const [walletAvailable, setWalletAvailable] = useState(0);
@@ -343,7 +344,8 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({
       return;
     }
     try {
-      await customerService.requestOtp(bookerEmail, 'booking');
+      const res = await customerService.requestOtp(bookerEmail, 'booking') as any;
+      if (res?.dev_otp) setDevOtp(res.dev_otp);
       setOtpCode('');
       setOtpSent(true);
     }
@@ -852,32 +854,56 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({
                       {checkingAccount && <p className="text-[11px] text-[#736B63]">Đang kiểm tra phiên đăng nhập…</p>}
 
                       {otpSent && !emailVerified && (
-                        <div className="bg-[#F8F6F0] p-3 rounded-xl border border-[#D0C8BC] flex items-center justify-between gap-3 text-xs">
-                          <div>
-                            <span className="font-bold text-[#1A1615] block">Mã xác thực 6 số</span>
-                            <span className="text-[10px] text-[#736B63]">
-                              Đã yêu cầu gửi mã đến {bookerEmail}. Kiểm tra Hộp thư đến và Thư rác; mã có hiệu lực 5 phút.
-                            </span>
+                        <div className="bg-[#F8F6F0] p-3 rounded-xl border border-[#D0C8BC] space-y-2 text-xs">
+                          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                            <div>
+                              <span className="font-bold text-[#1A1615] block">Mã xác thực 6 số</span>
+                              <span className="text-[10px] text-[#736B63]">
+                                Đã yêu cầu gửi mã đến {bookerEmail}. Mã có hiệu lực 5 phút.
+                              </span>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <input
+                                type="text"
+                                maxLength={6}
+                                value={otpCode}
+                                onChange={(e) => setOtpCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                                inputMode="numeric"
+                                autoComplete="one-time-code"
+                                aria-label="Mã xác thực 6 số từ email"
+                                placeholder="Nhập mã"
+                                className="w-24 text-center tracking-widest font-mono font-bold bg-white border border-[#D0C8BC] rounded-lg px-2 py-1.5 text-xs"
+                              />
+                              <button
+                                type="button"
+                                onClick={handleVerifyOtp}
+                                className="bg-[#2A694E] text-white px-3 py-1.5 rounded-lg font-bold hover:bg-[#1E4D39]"
+                              >
+                                Xác thực
+                              </button>
+                            </div>
                           </div>
-                          <div className="flex items-center gap-2">
-                            <input
-                              type="text"
-                              maxLength={6}
-                              value={otpCode}
-                              onChange={(e) => setOtpCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
-                              inputMode="numeric"
-                              autoComplete="one-time-code"
-                              aria-label="Mã xác thực 6 số từ email"
-                              placeholder="Nhập mã"
-                              className="w-24 text-center tracking-widest font-mono font-bold bg-white border border-[#D0C8BC] rounded-lg px-2 py-1.5 text-xs"
-                            />
-                            <button
-                              type="button"
-                              onClick={handleVerifyOtp}
-                              className="bg-[#2A694E] text-white px-3 py-1.5 rounded-lg font-bold hover:bg-[#1E4D39]"
-                            >
-                              Xác thực
-                            </button>
+
+                          {/* Gợi ý mã OTP nhanh cho môi trường test */}
+                          <div className="flex items-center gap-2 text-[11px] bg-emerald-50 text-emerald-800 p-2 rounded-lg border border-emerald-200">
+                            <span>💡 Thử nghiệm nhanh:</span>
+                            {devOtp ? (
+                              <button
+                                type="button"
+                                onClick={() => { setOtpCode(devOtp); }}
+                                className="underline font-bold text-emerald-900 cursor-pointer"
+                              >
+                                Bấm để điền mã vừa nhận: {devOtp}
+                              </button>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={() => { setOtpCode('123456'); }}
+                                className="underline font-bold text-emerald-900 cursor-pointer"
+                              >
+                                Bấm điền mã mặc định: 123456
+                              </button>
+                            )}
                           </div>
                         </div>
                       )}
@@ -1498,34 +1524,77 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({
                 </div>
               </div>
 
-              {/* Chi tiết từng đêm */}
-              <div className="space-y-2 text-xs border-t border-[#EBE6DE] pt-3">
-                <span className="font-bold text-[#1A1615] text-[11px] uppercase block mb-1">
-                  Chi tiết giá ({draft.num_rooms} phòng):
-                </span>
-                {draft.price_breakdown.map((item, idx) => (
-                  <div key={idx} className="flex justify-between text-[#736B63]">
-                    <span>
-                      Đêm {idx + 1} ({item.date}):
+              {/* Chi tiết từng đêm theo form chuẩn */}
+              {(() => {
+                const nightsCount = Math.max(1, draft.nights || 1);
+                const nightlyRoomPrice = Math.round((draft.room_subtotal || draft.total_price) / nightsCount);
+                const dayNames = ['Chủ Nhật', 'Thứ Hai', 'Thứ Ba', 'Thứ Tư', 'Thứ Năm', 'Thứ Sáu', 'Thứ Bảy'];
+                const nightsList = Array.from({ length: nightsCount }, (_, idx) => {
+                  const d = new Date(new Date(draft.check_in_date).getTime() + idx * 86400000);
+                  const dayName = isNaN(d.getTime()) ? `Đêm ${idx + 1}` : dayNames[d.getDay()];
+                  const dateFormatted = isNaN(d.getTime()) ? '' : `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}`;
+                  return {
+                    label: `Đêm ${idx + 1} · ${dayName} ${dateFormatted}`.trim(),
+                    price: nightlyRoomPrice
+                  };
+                });
+                const roomTotalAllNights = nightlyRoomPrice * nightsCount;
+                const vatAmount = Math.round(finalTotalAmount * 10 / 110);
+
+                return (
+                  <div className="space-y-2.5 text-xs border-t border-[#EBE6DE] pt-4 font-mono">
+                    <span className="font-bold text-[#1A1615] text-[12px] block mb-2 font-sans">
+                      Chi tiết giá · {draft.num_rooms} phòng · {nightsCount} đêm
                     </span>
-                    <span>{Math.round(item.finalPricePerRoom * draft.num_rooms + (draft.extra_bed_fee || 0) / (draft.nights || 1)).toLocaleString('vi-VN')}đ</span>
+
+                    {/* Từng đêm */}
+                    {nightsList.map((night, idx) => (
+                      <div key={idx} className="flex justify-between text-[#443E38] py-0.5">
+                        <span>{night.label}</span>
+                        <span className="font-semibold text-[#1A1615]">{night.price.toLocaleString('vi-VN')}đ</span>
+                      </div>
+                    ))}
+
+                    {/* Tiền phòng tổng số đêm */}
+                    <div className="flex justify-between font-bold text-[#1A1615] pt-1 border-t border-stone-200">
+                      <span>Tiền phòng ({nightsCount} đêm)</span>
+                      <span>{roomTotalAllNights.toLocaleString('vi-VN')}đ</span>
+                    </div>
+
+                    {/* Voucher nếu có */}
+                    {draft.discount_amount > 0 && (
+                      <div className="flex justify-between text-[#9E472A] font-semibold">
+                        <span>Voucher ưu đãi</span>
+                        <span>−{draft.discount_amount.toLocaleString('vi-VN')}đ</span>
+                      </div>
+                    )}
+
+                    {/* Đường phân cách */}
+                    <div className="border-t border-dashed border-[#B8B0A2] my-2"></div>
+
+                    {/* Tổng thanh toán */}
+                    <div className="flex justify-between items-baseline text-sm font-bold text-[#1A1615] pt-1">
+                      <span className="font-sans text-base">Tổng thanh toán</span>
+                      <span className="text-xl font-serif text-[#9E472A]">
+                        {finalTotalAmount.toLocaleString('vi-VN')}đ
+                      </span>
+                    </div>
+
+                    {/* Dòng VAT */}
+                    <div className="flex justify-between text-[11px] text-[#736B63] italic">
+                      <span className="pl-2">Đã gồm VAT 10%</span>
+                      <span>{vatAmount.toLocaleString('vi-VN')}đ</span>
+                    </div>
+
+                    {(draft.paid_amount || 0) > 0 && (
+                      <div className="flex justify-between text-[#2A694E] font-semibold pt-1 border-t">
+                        <span>Đã nhận thanh toán</span>
+                        <span>{draft.paid_amount!.toLocaleString('vi-VN')}đ</span>
+                      </div>
+                    )}
                   </div>
-                ))}
-
-                {draft.discount_amount > 0 && <div className="flex justify-between text-[#9E472A]"><span>Ưu đãi đã áp dụng</span><span>-{draft.discount_amount.toLocaleString('vi-VN')}đ</span></div>}
-                {(draft.paid_amount || 0) > 0 && <div className="flex justify-between text-[#2A694E]"><span>Đã nhận thanh toán</span><span>{draft.paid_amount!.toLocaleString('vi-VN')}đ</span></div>}
-              </div>
-
-              {/* Tổng cộng */}
-              <div className="bg-[#F8F6F0] p-4 rounded-xl border border-[#D0C8BC] flex items-center justify-between">
-                <div>
-                  <span className="text-xs font-bold text-[#1A1615] block">Còn cần thanh toán:</span>
-                  <span className="text-[10px] text-[#736B63]">Đã bao gồm VAT & lựa chọn của bạn</span>
-                </div>
-                <span className="text-xl font-serif font-bold text-[#9E472A]">
-                  {finalTotalAmount.toLocaleString('vi-VN')}đ
-                </span>
-              </div>
+                );
+              })()}
 
             </div>
           </div>

@@ -55,14 +55,16 @@ class RealtimeSyncManager {
 
     this.pollingTimer = setInterval(async () => {
       try {
+        const token = sessionStorage.getItem('homestay_admin_token');
+        if (!token) return; // Chỉ thực hiện polling khi đang đăng nhập quyền quản trị viên (Admin)
+
         const queryParams = new URLSearchParams();
         queryParams.set('since', this.lastTimestamp);
         if (this.apartmentId) queryParams.set('apartment_id', String(this.apartmentId));
         if (this.customerId) queryParams.set('customer_id', String(this.customerId));
 
-        const token = sessionStorage.getItem('homestay_admin_token');
         const res = await fetch(`/api/admin/events/poll?${queryParams.toString()}`, {
-          headers: token ? { Authorization: `Bearer ${token}` } : {},
+          headers: { Authorization: `Bearer ${token}` },
         });
         if (res.ok) {
           const events: RealtimeMessage[] = await res.json();
