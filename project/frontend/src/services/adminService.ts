@@ -159,12 +159,19 @@ export interface AuditLogItem {
 // ============================================================
 // API CLIENT CALLS
 // ============================================================
-const getHeaders = (role: StaffRole, actor?: string) => ({
-  headers: {
-    'x-staff-role': role,
-    'x-staff-actor': actor || `${role}_user@homestay.com`,
-  },
-});
+const getHeaders = (role: StaffRole, actor?: string) => {
+  const token =
+    typeof window !== 'undefined'
+      ? sessionStorage.getItem('homestay_admin_token') || localStorage.getItem('token')
+      : null;
+  return {
+    headers: {
+      'x-staff-role': role,
+      'x-staff-actor': actor || `${role}_user@homestay.com`,
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+  };
+};
 
 // ============================================================
 // VALIDATION HELPERS (SĐT & EMAIL / GMAIL)
@@ -1148,7 +1155,7 @@ export const adminApi = {
   getBranches: async (role: StaffRole) => {
     try {
       const res = await api.get('/admin/branches', getHeaders(role));
-      if (Array.isArray(res.data) && res.data.length > 0) {
+      if (Array.isArray(res.data)) {
         saveSimBranches(res.data);
         return res.data as BranchItem[];
       }
@@ -1246,7 +1253,7 @@ export const adminApi = {
     try {
       const params = apartmentId ? `?apartment_id=${apartmentId}` : '';
       const res = await api.get(`/admin/room-types${params}`, getHeaders(role));
-      if (Array.isArray(res.data) && res.data.length > 0) {
+      if (Array.isArray(res.data)) {
         return res.data as RoomTypeItem[];
       }
     } catch {}
@@ -1340,7 +1347,7 @@ export const adminApi = {
       if (filters?.is_hidden !== undefined) params.set('is_hidden', String(filters.is_hidden));
       const query = params.toString() ? `?${params.toString()}` : '';
       const res = await api.get(`/admin/rooms${query}`, getHeaders(role));
-      if (Array.isArray(res.data) && res.data.length > 0) {
+      if (Array.isArray(res.data)) {
         return res.data as RoomItem[];
       }
     } catch {}
