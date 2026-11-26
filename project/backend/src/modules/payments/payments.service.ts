@@ -43,7 +43,7 @@ export class PaymentsService {
     try { const url = new URL(value); if (url.protocol === 'https:' && (url.hostname === 'pay.payos.vn' || url.hostname.endsWith('.payos.vn'))) return url.href; } catch {}
     throw new BadRequestException('Đường dẫn thanh toán PayOS không hợp lệ.');
   }
-  async createPayOSUrl(customerId: number, bookingId: number, useWallet = false) {
+  async createPayOSUrl(customerId: number, bookingId: number, useWallet = false, clientOrigin?: string) {
     await this.owned(customerId, bookingId);
     // Reconcile an earlier attempt before offering another link; never overwrite a paid receipt.
     const previous = await this.db.getRepository(Payment).findOne({ where: { booking_id: bookingId, payment_status: 'pending' }, order: { id: 'DESC' } });
@@ -108,8 +108,8 @@ export class PaymentsService {
       return manager.getRepository(Payment).save(row);
     });
     if (!payment) return { booking_id: bookingId, amount: 0, status: 'paid', wallet_used: 0 };
-    if (payment.provider_data.checkout_url) return this.view(payment);
-    const origin = this.getFrontendOrigin();
+    const origin = clientOrigin || this.getFrontendOrigin();
+    if (payment.provider_data.checkout_url && payment.provider_data.origin === origin) return this.view(payment);
     const path = `${origin}/tra-cuu/don/${bookingId}`;
     // Repeating the same attempt uses the same order code, including after a network timeout.
     let link: any;
@@ -129,7 +129,7 @@ export class PaymentsService {
       // All payment operations lock booking first, then payment: no webhook/create lock inversion.
       await manager.getRepository(Booking).findOne({ where: { id: bookingId }, lock: { mode: 'pessimistic_write' } });
       const row = await manager.getRepository(Payment).findOne({ where: { id: payment.id }, lock: { mode: 'pessimistic_write' } });
-      row.provider_data = { ...row.provider_data, link_id: link.paymentLinkId, checkout_url: url };
+      row.provider_data = { ...row.provider_data, link_id: link.paymentLinkId, checkout_url: url, origin };
       await manager.getRepository(Payment).save(row);
     });
     return this.view(await this.db.getRepository(Payment).findOneByOrFail({ id: payment.id }));
@@ -227,12 +227,12 @@ export class PaymentsService {
   }
 
   private getFrontendOrigin(): string {
-    const raw = this.config.get<string>('FRONTEND_URL', 'http://localhost:5174');
+    const raw = this.config.get<string>('FRONTEND_URL', 'http://localhost:5173');
     try {
       const formatted = raw.startsWith('http://') || raw.startsWith('https://') ? raw : `https://${raw}`;
       return new URL(formatted).origin;
     } catch {
-      return 'http://localhost:5174';
+      return 'http://localhost:5173';
     }
   }
 }

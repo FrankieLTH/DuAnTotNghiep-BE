@@ -7,7 +7,14 @@ class CreatePaymentDto { @IsInt() @Min(1) booking_id: number; @IsOptional() @IsB
 export class PaymentsController {
   constructor(private readonly paymentsService: PaymentsService) {}
   @Post('payments/create-payos-url') @UseGuards(CustomerGuard)
-  createPayOSUrl(@Req() req, @Body() body: CreatePaymentDto) { return this.paymentsService.createPayOSUrl(req.customerSession.customer.id, body.booking_id, body.use_wallet === true); }
+  createPayOSUrl(@Req() req, @Body() body: CreatePaymentDto) {
+    let clientOrigin: string | undefined;
+    try {
+      if (req.headers.origin) clientOrigin = new URL(req.headers.origin).origin;
+      else if (req.headers.referer) clientOrigin = new URL(req.headers.referer).origin;
+    } catch {}
+    return this.paymentsService.createPayOSUrl(req.customerSession.customer.id, body.booking_id, body.use_wallet === true, clientOrigin);
+  }
   @Get('payments/wallet') @UseGuards(CustomerGuard) @Header('Cache-Control', 'no-store')
   wallet(@Req() req) { return this.paymentsService.wallet(req.customerSession.customer.id); }
   @Get('payments/bookings/:id/status') @UseGuards(CustomerGuard)

@@ -551,7 +551,7 @@ export class Payment {
   paid_at: Date;
 
   @Column({ type: 'json', nullable: true })
-  provider_data: { order_code: number; hold_until: string; link_id?: string; checkout_url?: string; provider_status?: string; review_required?: boolean; received_amount?: number; wallet_reserved?: number };
+  provider_data: { order_code: number; hold_until: string; link_id?: string; checkout_url?: string; provider_status?: string; review_required?: boolean; received_amount?: number; wallet_reserved?: number; origin?: string };
 
   @CreateDateColumn()
   created_at: Date;

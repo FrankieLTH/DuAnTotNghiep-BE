@@ -47,7 +47,7 @@ function App() {
   const getInitialView = (): ViewState => {
     if (typeof window !== 'undefined') {
       const pathname = window.location.pathname.toLowerCase();
-      if (/^\/tra-cuu\/don\/\d+$/.test(pathname)) return 'booking-detail';
+      if (/^\/tra-cuu\/don\/\d+\/?$/.test(pathname)) return 'booking-detail';
       if (['/tra-cuu', '/account', '/booking-lookup'].includes(pathname)) return 'my-account';
       if (pathname === '/admin' || pathname.startsWith('/admin')) {
         return 'admin';
@@ -57,8 +57,11 @@ function App() {
   };
 
   const [currentView, setCurrentView] = useState<ViewState>(getInitialView);
-  const [bookingId, setBookingId] = useState(() => Number(window.location.pathname.match(/\/tra-cuu\/don\/(\d+)$/)?.[1] || 0));
-  const [bookingScope, setBookingScope] = useState<CustomerScope>(() => window.history.state?.customerScope || sessionStorage.getItem(`payment_scope_${window.location.pathname.match(/\/tra-cuu\/don\/(\d+)$/)?.[1] || ''}`) as CustomerScope || (getCustomerToken('account') ? 'account' : 'lookup'));
+  const [bookingId, setBookingId] = useState(() => Number(window.location.pathname.match(/\/tra-cuu\/don\/(\d+)/)?.[1] || 0));
+  const [bookingScope, setBookingScope] = useState<CustomerScope>(() => {
+    const id = window.location.pathname.match(/\/tra-cuu\/don\/(\d+)/)?.[1] || '';
+    return (window.history.state?.customerScope || (id ? sessionStorage.getItem(`payment_scope_${id}`) : null) || (getCustomerToken('lookup') ? 'lookup' : (getCustomerToken('account') ? 'account' : 'lookup'))) as CustomerScope;
+  });
   const [selectedRoomId, setSelectedRoomId] = useState<number>(1);
   const [selectedBasket, setSelectedBasket] = useState<Basket | null>(null);
   const [previousView, setPreviousView] = useState<ViewState | null>(null);
@@ -69,9 +72,12 @@ function App() {
   useEffect(() => {
     const handlePopState = () => {
       const pathname = window.location.pathname.toLowerCase();
-      const match = pathname.match(/^\/tra-cuu\/don\/(\d+)$/);
+      const match = pathname.match(/^\/tra-cuu\/don\/(\d+)\/?$/);
       if (match) {
-        setBookingId(Number(match[1])); setBookingScope(window.history.state?.customerScope || sessionStorage.getItem(`payment_scope_${window.location.pathname.match(/\/tra-cuu\/don\/(\d+)$/)?.[1] || ''}`) as CustomerScope || (getCustomerToken('account') ? 'account' : 'lookup')); setCurrentView('booking-detail');
+        const id = match[1];
+        setBookingId(Number(id));
+        setBookingScope((window.history.state?.customerScope || sessionStorage.getItem(`payment_scope_${id}`) || (getCustomerToken('lookup') ? 'lookup' : (getCustomerToken('account') ? 'account' : 'lookup'))) as CustomerScope);
+        setCurrentView('booking-detail');
       } else if (['/tra-cuu', '/account', '/booking-lookup'].includes(pathname)) {
         setCurrentView('my-account');
       } else if (pathname === '/admin' || pathname.startsWith('/admin')) {

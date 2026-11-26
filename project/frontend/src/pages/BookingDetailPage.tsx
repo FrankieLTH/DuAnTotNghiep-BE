@@ -19,28 +19,50 @@ export function BookingDetailPage({ id, scope, onBack, onBookRoom }: { id: numbe
     catch (err) { setError(customerError(err)); } finally { setResuming(false); }
   };
   const [retry, setRetry] = useState(0);
+  const [activeScope, setActiveScope] = useState<CustomerScope>(scope);
+  useEffect(() => { setActiveScope(scope); }, [scope]);
   useEffect(() => {
     let active = true;
     setLoading(true); setError(''); setBooking(null); setDraft(null);
     (async () => {
+      let currentScope = activeScope;
       try {
         if (new URLSearchParams(window.location.search).has('payment_return')) {
-          const result = await paymentService.status(id, scope);
-          const paid = result.payments.find(p => p.status === 'paid' || p.review_required);
-          if (active) setNotice(paid ? (paid.review_required ? 'Đã ghi nhận khoản thu cần homestay kiểm tra. Vui lòng xem số tiền đã nhận trong đơn và liên hệ hỗ trợ trước khi chuyển thêm.' : 'Thanh toán thành công. Đơn đặt phòng đã được xác nhận.') : 'Chưa ghi nhận thanh toán hoàn tất. Nếu đã chuyển tiền, bấm Kiểm tra thanh toán để cập nhật; không chuyển lại khi chưa kiểm tra.');
+          try {
+            const result = await paymentService.status(id, currentScope);
+            const paid = result.payments.find(p => p.status === 'paid' || p.review_required);
+            if (active) setNotice(paid ? (paid.review_required ? 'Đã ghi nhận khoản thu cần homestay kiểm tra. Vui lòng xem số tiền đã nhận trong đơn và liên hệ hỗ trợ trước khi chuyển thêm.' : 'Thanh toán thành công. Đơn đặt phòng đã được xác nhận.') : 'Chưa ghi nhận thanh toán hoàn tất. Nếu đã chuyển tiền, bấm Kiểm tra thanh toán để cập nhật; không chuyển lại khi chưa kiểm tra.');
+          } catch (statusErr) {
+            const altScope: CustomerScope = currentScope === 'lookup' ? 'account' : 'lookup';
+            try {
+              const result = await paymentService.status(id, altScope);
+              currentScope = altScope;
+              if (active) setActiveScope(altScope);
+              const paid = result.payments.find(p => p.status === 'paid' || p.review_required);
+              if (active) setNotice(paid ? (paid.review_required ? 'Đã ghi nhận khoản thu cần homestay kiểm tra. Vui lòng xem số tiền đã nhận trong đơn và liên hệ hỗ trợ trước khi chuyển thêm.' : 'Thanh toán thành công. Đơn đặt phòng đã được xác nhận.') : 'Chưa ghi nhận thanh toán hoàn tất. Nếu đã chuyển tiền, bấm Kiểm tra thanh toán để cập nhật; không chuyển lại khi chưa kiểm tra.');
+            } catch {}
+          }
         }
-        const detail = await customerService.detail(id, scope);
+        let detail: CustomerBooking;
+        try {
+          detail = await customerService.detail(id, currentScope);
+        } catch (detailErr) {
+          const altScope: CustomerScope = currentScope === 'lookup' ? 'account' : 'lookup';
+          detail = await customerService.detail(id, altScope);
+          currentScope = altScope;
+          if (active) setActiveScope(altScope);
+        }
         if (!active) return;
         setBooking(detail);
         if (detail.can_continue) {
-          const saved = await customerService.checkout(id, scope);
+          const saved = await customerService.checkout(id, currentScope);
           if (active) setDraft(saved);
         }
       } catch (err) { if (active) setError(customerError(err)); }
       finally { if (active) setLoading(false); }
     })();
     return () => { active = false; };
-  }, [id, scope, retry]);
+  }, [id, activeScope, retry]);
   const completeGuests = draft?.guests.filter(g => g.full_name?.trim() && g.date_of_birth && (g.guest_type === 'child' || g.id_number?.trim()) && g.slot_status === 'confirmed').length || 0;
   return <main className="booking-detail-page">
     <div className="customer-account ca-booking-intro"><div className="ca-container">
