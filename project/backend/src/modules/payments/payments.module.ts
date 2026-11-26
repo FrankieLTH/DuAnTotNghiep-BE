@@ -1,13 +1,8 @@
+import { RoomsModule } from '../rooms/rooms.module';
 import { Module } from '@nestjs/common';
-import { TypeOrmModule } from '@nestjs/typeorm';
+import { CustomerModule } from '../customer/customer.module';
 import { PaymentsService } from './payments.service';
 import { PaymentsController } from './payments.controller';
-import { Payment, Booking } from '../../entities/booking.entity';
-
-@Module({
-  imports: [TypeOrmModule.forFeature([Payment, Booking])],
-  providers: [PaymentsService],
-  controllers: [PaymentsController],
-  exports: [PaymentsService],
-})
+import { PayosGateway } from './payos.gateway';
+@Module({ imports: [CustomerModule, RoomsModule], providers: [PaymentsService, PayosGateway], controllers: [PaymentsController], exports: [PaymentsService] })
 export class PaymentsModule {}

@@ -1,0 +1,14 @@
+// Local-only classification regression. All customer fixtures are removed after testing.
+require('dotenv').config({quiet:true});require('../register-paths.cjs');require('reflect-metadata');
+const assert=require('node:assert/strict'),crypto=require('node:crypto');const {DataSource}=require('typeorm');
+const users=require('../dist/backend/src/entities/user.entity'),rooms=require('../dist/backend/src/entities/room.entity'),booking=require('../dist/backend/src/entities/booking.entity');
+const {AdminCustomerService}=require('../dist/backend/src/modules/admin/admin-customer.service');
+if(process.env.DB_DATABASE!=='duanmoi'||!['localhost','127.0.0.1'].includes(process.env.DB_HOST))throw Error('Only isolated local duanmoi database is allowed');
+const prefix='qa-account-type-'+crypto.randomBytes(6).toString('hex'),ids=[];let db;
+(async()=>{db=new DataSource({type:'mysql',host:process.env.DB_HOST,port:+process.env.DB_PORT,username:process.env.DB_USERNAME,password:process.env.DB_PASSWORD,database:process.env.DB_DATABASE,entities:[...Object.values(users),...Object.values(rooms),...Object.values(booking)].filter(x=>typeof x==='function'),synchronize:false});await db.initialize();
+const cases=[{name:'guest',data:{},expected:'GUEST_UNACTIVATED'},{name:'registered',data:{password_hash:'qa-fixture-hash',email_verified_at:new Date(),account_created_at:new Date()},expected:'REGISTERED'},{name:'unverified',data:{password_hash:'qa-fixture-hash'},expected:'GUEST_UNACTIVATED'},{name:'blocked',data:{password_hash:'qa-fixture-hash',email_verified_at:new Date(),is_blocked:true},expected:'REGISTERED'},{name:'verified-without-password',data:{email_verified_at:new Date()},expected:'GUEST_UNACTIVATED'},{name:'empty-password',data:{password_hash:'',email_verified_at:new Date()},expected:'GUEST_UNACTIVATED'}];
+for(const test of cases){const row=await db.getRepository(users.Customer).save({full_name:prefix+' '+test.name,email:prefix+'-'+test.name+'@example.test',...test.data});ids.push(row.id);test.id=row.id;}
+const service=new AdminCustomerService(db,{log:async()=>{}});const list=await service.getCustomers({search:prefix,limit:100});assert.equal(list.items.length,cases.length);
+for(const test of cases){const row=list.items.find(x=>x.id===test.id);assert.equal(row.account_type,test.expected,test.name);const detail=await service.getCustomerById(test.id);assert.equal(detail.account_type,test.expected,test.name+' detail');assert.equal(row.password_hash,undefined);assert.equal(detail.password_hash,undefined);}
+console.log('PASS: list/detail classify registered, guest, unverified, blocked and empty-password customers without exposing password hashes.');
+})().catch(e=>{console.error(e.message);process.exitCode=1}).finally(async()=>{if(db?.isInitialized){for(const id of ids)await db.getRepository(users.Customer).delete(id);await db.destroy();}});

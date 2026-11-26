@@ -4,17 +4,22 @@ import axios from 'axios';
  * Cấu hình Axios Instance kết nối tới NestJS Backend
  */
 const api = axios.create({
-  baseURL: import.meta.env.VITE_API_URL || 'http://localhost:3000',
+  baseURL: import.meta.env.VITE_API_URL || '/api',
   headers: {
     'Content-Type': 'application/json',
   },
   timeout: 10000,
 });
 
+export const adminAuthHeaders = (): Record<string, string> => {
+  const token = sessionStorage.getItem('homestay_admin_token');
+  return token ? { Authorization: `Bearer ${token}` } : {};
+};
+
 // Request Interceptor: Tự động gắn Token xác thực nếu có
 api.interceptors.request.use(
   (config) => {
-    const token = localStorage.getItem('token');
+    const token = sessionStorage.getItem('homestay_admin_token') || localStorage.getItem('token');
     if (token && config.headers) {
       config.headers.Authorization = `Bearer ${token}`;
     }

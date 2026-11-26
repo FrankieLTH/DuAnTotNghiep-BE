@@ -51,9 +51,7 @@ export class BasketService {
 
     const now = Date.now();
     const cached = this.cache.get(cacheKey);
-    if (cached && cached.expiresAt > now) {
-      return cached.baskets;
-    }
+    // Availability and feature fees are read live so an admin change cannot leave a stale paid quote.
 
     // 1. Lấy danh sách loại phòng còn trống từ AvailabilityService
     const availableTypes = await this.availabilityService.getAvailableRoomTypes(criteria);
@@ -69,7 +67,8 @@ export class BasketService {
 
     // 4. Nếu không có giỏ nào phù hợp, áp dụng 5 cấp độ nới lỏng (fallback)
     if (baskets.length === 0) {
-      baskets = fallbackBaskets(criteria, availableTypes, DEFAULT_BASKET_CONFIG, voucherRule);
+      // Keep the requested branch, dates and room count; do not sell a silently relaxed stay.
+      baskets = [];
     }
 
     // Sắp xếp lại danh sách kết quả nếu khách chọn sort
@@ -80,7 +79,7 @@ export class BasketService {
     }
 
     // Lưu cache 30 giây
-    this.cache.set(cacheKey, { baskets, expiresAt: now + 30000 });
+
 
     return baskets;
   }

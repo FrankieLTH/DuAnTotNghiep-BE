@@ -87,7 +87,7 @@ export class RealtimeSyncService {
   /**
    * Fallback Polling endpoint cho client khi SSE gặp sự cố mạng (HTTP GET /api/events/poll)
    */
-  pollEvents(sinceTimestamp?: string, apartment_id?: number, customer_id?: number): DomainEvent[] {
+  pollEvents(sinceTimestamp?: string, apartment_id?: number, customer_id?: number, isStaff = false): DomainEvent[] {
     let list = this.eventHistory;
     if (sinceTimestamp) {
       const sinceTime = new Date(sinceTimestamp).getTime();
@@ -95,6 +95,7 @@ export class RealtimeSyncService {
     }
 
     return list.filter((ev) => {
+      if (!isStaff) return false;
       if (customer_id && ev.customer_id === customer_id) return true;
       if (ev.type === REALTIME_EVENTS.AVAILABILITY_CHANGED || ev.type === REALTIME_EVENTS.CATALOG_CHANGED) {
         if (!apartment_id) return true;

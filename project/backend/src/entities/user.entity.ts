@@ -65,6 +65,21 @@ export class Customer {
   @Column({ nullable: true })
   phone: string;
 
+  @Column({ nullable: true, select: false })
+  password_hash: string;
+
+  @Column({ type: 'datetime', nullable: true })
+  account_created_at: Date;
+
+  @Column({ type: 'datetime', nullable: true })
+  email_verified_at: Date;
+
+  @Column('decimal', { precision: 12, scale: 2, default: 0 })
+  wallet_balance: number;
+
+  @Column('decimal', { precision: 12, scale: 2, default: 0 })
+  wallet_reserved: number;
+
   @Column({ default: false })
   is_blocked: boolean;
 

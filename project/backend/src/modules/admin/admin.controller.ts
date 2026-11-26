@@ -1,3 +1,5 @@
+import { CustomerManagementService } from '../customer/customer-management.service';
+import { ReviewCustomerRequestDto } from '../customer/customer.dto';
 import {
   Controller,
   Get,
@@ -13,6 +15,7 @@ import {
   Sse,
 } from '@nestjs/common';
 import { PermissionsGuard } from '../../common/guards/permissions.guard';
+import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RequirePermissions } from '../../common/decorators/permissions.decorator';
 import { Permission, StaffRole, StaffContext } from '../../common/config/permissions.config';
 import { CurrentStaff } from '../../common/decorators/current-staff.decorator';
@@ -41,9 +44,10 @@ import {
 } from './admin-room.service';
 
 @Controller('admin')
-@UseGuards(PermissionsGuard)
+@UseGuards(JwtAuthGuard, PermissionsGuard)
 export class AdminController {
   constructor(
+    private readonly customerManagement: CustomerManagementService,
     private readonly bookingService: AdminBookingService,
     private readonly autoAssignService: AutoRoomAssignmentService,
     private readonly retentionService: RetentionJobsService,
@@ -55,6 +59,16 @@ export class AdminController {
     private readonly roomService: AdminRoomService,
     private readonly realtimeSyncService: RealtimeSyncService,
   ) {}
+
+  @Get('customer-requests')
+  @RequirePermissions(Permission.BOOKINGS_VIEW)
+  customerRequests(@CurrentStaff() staff: StaffContext) { return this.customerManagement.staffRequests(staff); }
+
+  @Put('customer-requests/:id')
+  @RequirePermissions(Permission.BOOKINGS_VIEW)
+  reviewCustomerRequest(@CurrentStaff() staff: StaffContext, @Param('id', ParseIntPipe) id: number, @Body() body: ReviewCustomerRequestDto) {
+    return this.customerManagement.reviewRequest(staff, id, body);
+  }
 
   // ============================================================
   // 1. QUẢN LÝ CHI NHÁNH (BRANCHES / APARTMENT)
@@ -160,6 +174,14 @@ export class AdminController {
     return this.roomService.hideRoomType(id, staff.actor);
   }
 
+  @Delete('room-types/:id')
+  @RequirePermissions(Permission.ROOM_TYPES_MANAGE)
+  async deleteRoomType(
+    @Param('id', ParseIntPipe) id: number,
+    @CurrentStaff() staff: StaffContext,
+  ) {
+    return this.roomService.deleteRoomType(id, staff.actor);
+  }
   // ============================================================
   // 3. QUẢN LÝ PHÒNG CỤ THỂ (ROOMS & LOCK ASSIGNMENT)
   // ============================================================
@@ -377,7 +399,8 @@ export class AdminController {
   // Room Blocks (Lịch bảo trì)
   @Get('rooms/:id/blocks')
   @RequirePermissions(Permission.ROOMS_VIEW)
-  async getRoomBlocks(@Param('id', ParseIntPipe) id: number) {
+  async getRoomBlocks(@Param('id', ParseIntPipe) id: number, @CurrentStaff() staff: StaffContext) {
+    await this.roomService.getRoomById(id, staff);
     return this.roomService.getRoomBlocks(id);
   }
 
@@ -688,6 +711,7 @@ export class AdminController {
   // REALTIME SYNCHRONIZATION: SSE STREAM & POLLING FALLBACK
   // ============================================================
   @Sse('events/stream')
+  @RequirePermissions(Permission.BOOKINGS_VIEW)
   streamEvents(
     @Query('apartment_id') apartmentId?: number,
     @Query('customer_id') customerId?: number,
@@ -703,15 +727,21 @@ export class AdminController {
   }
 
   @Get('events/poll')
+  @RequirePermissions(Permission.BOOKINGS_VIEW)
   pollEvents(
     @Query('since') since?: string,
     @Query('apartment_id') apartmentId?: number,
     @Query('customer_id') customerId?: number,
+    @CurrentStaff() staff?: StaffContext,
   ) {
+    const scopedApartmentId = staff?.role === 'manager'
+      ? staff.apartmentId
+      : apartmentId ? Number(apartmentId) : undefined;
     return this.realtimeSyncService.pollEvents(
       since,
-      apartmentId ? Number(apartmentId) : undefined,
-      customerId ? Number(customerId) : undefined
+      scopedApartmentId,
+      customerId ? Number(customerId) : undefined,
+      true,
     );
   }
 
@@ -719,6 +749,7 @@ export class AdminController {
   // 5. GÁN PHÒNG TỰ ĐỘNG & BẢO TRÌ PHÒNG
   // ============================================================
   @Post('rooms/auto-assign-on-payment/:bookingId')
+  @RequirePermissions(Permission.ROOMS_MANAGE)
   async triggerAutoAssign(@Param('bookingId', ParseIntPipe) bookingId: number, @Req() req: any) {
     const actor: string = req.staffActor || 'system_payment';
     return this.autoAssignService.assignRoomsOnPaymentSuccess(bookingId, actor);

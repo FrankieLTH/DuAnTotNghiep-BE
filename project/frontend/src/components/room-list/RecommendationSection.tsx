@@ -240,6 +240,7 @@ export const RecommendationSection: React.FC<RecommendationSectionProps> = ({
                           </span>
                         </div>
                       ))}
+                      {rec.items.some(item => item.features?.length) && <div className="text-xs text-[#795341] space-y-1">{rec.items.flatMap(item => item.features || []).map(feature => <div key={feature.id}>{feature.name}{feature.extra_price_per_night > 0 ? ` · +${Number(feature.extra_price_per_night).toLocaleString('vi-VN')}đ/đêm` : ' · Đã bao gồm'}</div>)}</div>}
                     </div>
 
                     {/* Ghi chú điều kiện nới lỏng (relaxed condition) */}

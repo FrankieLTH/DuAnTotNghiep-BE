@@ -20,19 +20,13 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onGoHome }) => {
   // Authentication state
   const [currentUser, setCurrentUser] = useState<AdminUser | null>(() => {
     try {
+      if (!sessionStorage.getItem('homestay_admin_token')) return null;
       const stored = sessionStorage.getItem('homestay_admin_session');
       if (stored) return JSON.parse(stored);
     } catch (e) {
       // ignore
     }
-    // Default to admin for smooth evaluation experience
-    return {
-      id: 1,
-      name: 'Võ Minh Quân (Admin)',
-      email: 'admin@homestay.com',
-      role: 'admin',
-      branchName: 'Tất cả chi nhánh',
-    };
+    return null;
   });
 
   // Navigation and active branch
@@ -147,10 +141,11 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onGoHome }) => {
     setAuditLogs((prev) => [newLog, ...prev]);
   };
 
-  const handleLoginSuccess = (user: AdminUser) => {
+  const handleLoginSuccess = (user: AdminUser, token: string) => {
     setCurrentUser(user);
     try {
       sessionStorage.setItem('homestay_admin_session', JSON.stringify(user));
+      sessionStorage.setItem('homestay_admin_token', token);
     } catch (e) {
       // ignore
     }
@@ -167,6 +162,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onGoHome }) => {
     setCurrentUser(null);
     try {
       sessionStorage.removeItem('homestay_admin_session');
+      sessionStorage.removeItem('homestay_admin_token');
     } catch (e) {
       // ignore
     }

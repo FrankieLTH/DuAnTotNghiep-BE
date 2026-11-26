@@ -6,8 +6,6 @@ import {
   RoomPlanItem,
   computeStayWindow,
   isOverlap,
-  recommend,
-  recommendWithFallback,
 } from '@shared/recommendation';
 import {
   Basket,
@@ -25,6 +23,11 @@ export interface AmenityItem {
   icon?: string;
 }
 
+export async function getAmenities():Promise<AmenityItem[]>{
+  const {data}=await api.get('/amenities',{timeout:15000});
+  return Array.isArray(data)?data:[];
+}
+
 export interface ApartmentItem {
   id: number;
   name: string;
@@ -34,6 +37,11 @@ export interface ApartmentItem {
 }
 
 export interface RoomItem {
+  room_type_parent_id?: number | null;
+  room_type_parent_name?: string;
+  base_type_price?: number;
+  feature_surcharge_per_night?: number;
+  features?: {id:number;name:string;extra_price_per_night:number}[];
   id: number;
   apartment_id: number;
   apartment_name: string;
@@ -59,6 +67,38 @@ export interface RoomItem {
   };
   description: string;
   badge?: string;
+}
+
+export interface RoomTypeOption {
+  variantKey: string;
+  roomTypeId: number;
+  maxOccupancy?: number;
+  name: string;
+  variantLabel: string;
+  roomIds: number[];
+  availableCount: number;
+  features: {id:number;name:string;extra_price_per_night:number}[];
+  featurePricePerNight: number;
+  basePricePerNight: number;
+  nights: number;
+  totalPrice: number;
+}
+
+export interface RoomVariant {roomTypeId:number;roomId?:number;name:string;variantLabel:string;basePrice:number;maxOccupancy:number;amenities?:{id:number;name:string;category:string}[]}
+export interface VariantCalendar {roomTypeId:number;month:string;nights:number;days:{date:string;availableCount:number;status:'past'|'available'|'sold_out'}[];suggestedDates:string[]}
+export async function getRoomVariants(roomTypeId:number):Promise<RoomVariant[]> {
+  const {data}=await api.get(`/room-types/${roomTypeId}/variants`);
+  return data;
+}
+export async function getVariantCalendar(roomTypeId:number,month:string,nights:number):Promise<VariantCalendar> {
+  const {data}=await api.get(`/room-types/${roomTypeId}/calendar`,{params:{month,nights}});
+  return data;
+}
+
+export async function getRoomTypeOptions(roomTypeId:number, checkIn:string, checkOut:string, adults:number, opts?:{stayType?:string;children?:number;rooms?:number}):Promise<RoomTypeOption[]> {
+  const {data}=await api.get(`/room-types/${roomTypeId}/options`,{params:{check_in:checkIn,check_out:checkOut,adults,stay_type:opts?.stayType,children:opts?.children,rooms:opts?.rooms},timeout:15000});
+  if(!Array.isArray(data))throw new Error('Không tải được phương án phòng.');
+  return data;
 }
 
 export interface ServiceItem {
@@ -417,93 +457,62 @@ export async function getRooms(params?: {
   min_price?: number;
   max_price?: number;
 }): Promise<RoomItem[]> {
-  try {
-    const res = await api.get('/rooms', { params, timeout: 3000 });
-    if (res.data && Array.isArray(res.data) && res.data.length > 0) {
-      // Map API result with seed enhancements
-      return res.data.map((r: any) => {
-        const seedMatch = SEED_ROOMS.find((sr) => sr.id === r.id);
-        return {
-          id: r.id,
-          apartment_id: r.apartment_id || seedMatch?.apartment_id || 1,
-          apartment_name: r.apartment_name || seedMatch?.apartment_name || 'Homestay',
-          address: r.address || seedMatch?.address || '',
-          city: seedMatch?.city || 'Việt Nam',
-          room_type_id: r.room_type_id || seedMatch?.room_type_id || 1,
-          room_type_name: r.room_type_name || seedMatch?.room_type_name || 'Studio',
-          room_number: r.room_number || seedMatch?.room_number || 'P101',
-          status: r.status || seedMatch?.status || 'available',
-          base_price: Number(r.base_price) || seedMatch?.base_price || 550000,
-          max_occupancy: r.max_occupancy || seedMatch?.max_occupancy || 2,
-          area: seedMatch?.area || '30m²',
-          bed_type: seedMatch?.bed_type || '1 Giường đôi King',
-          last_maintenance_date: r.last_maintenance_date || seedMatch?.last_maintenance_date,
-          images: (r.images && r.images.length > 0) ? r.images : (seedMatch?.images || []),
-          amenities: (r.amenities && r.amenities.length > 0) ? r.amenities : (seedMatch?.amenities || []),
-          lock: seedMatch?.lock,
-          description: seedMatch?.description || 'Phòng nghỉ tiện nghi hiện đại.',
-          badge: seedMatch?.badge,
-        };
-      });
-    }
-  } catch (err) {
-    // Backend offline / connecting error: fallback seamlessly to seed data
-  }
-
-  // Fallback lọc từ dữ liệu seed của database
-  let list = [...SEED_ROOMS];
-  if (params?.apartment_id) {
-    list = list.filter((r) => r.apartment_id === params.apartment_id);
-  }
-  if (params?.status) {
-    list = list.filter((r) => r.status === params.status);
-  }
-  if (params?.min_price) {
-    list = list.filter((r) => r.base_price >= params.min_price!);
-  }
-  if (params?.max_price) {
-    list = list.filter((r) => r.base_price <= params.max_price!);
-  }
-  return list;
+  const { data } = await api.get('/rooms', { params, timeout: 15000 });
+  if (!Array.isArray(data)) throw new Error('Danh sách phòng không hợp lệ.');
+  return data.map((r: any) => ({
+    id: Number(r.id),
+    apartment_id: Number(r.apartment_id),
+    apartment_name: r.apartment_name || '',
+    address: r.address || '',
+    city: String(r.address || '').split(',').pop()?.trim() || '',
+    room_type_id: Number(r.room_type_id),
+    room_type_name: r.room_type_name || '',
+    room_type_parent_id: r.room_type_parent_id ? Number(r.room_type_parent_id) : null,
+    room_type_parent_name: r.room_type_parent_name || r.room_type_name || '',
+    room_number: r.room_number || '',
+    status: r.status,
+    base_type_price: Number(r.base_type_price ?? r.base_price),
+    feature_surcharge_per_night: Number(r.feature_surcharge_per_night || 0),
+    features: r.features || [],
+    base_price: Number(r.effective_price_per_night ?? r.base_price),
+    max_occupancy: Number(r.max_occupancy || 2),
+    area: String(r.area || 0) + 'm²',
+    bed_type: r.bed_type || '',
+    last_maintenance_date: r.last_maintenance_date,
+    images: r.images || [],
+    amenities: r.amenities || [],
+    description: r.description || '',
+  }));
 }
 
-/**
- * Service lấy chi tiết 1 phòng theo ID
- */
+/** Lấy đúng phòng theo ID từ API; không thay phòng khác khi API lỗi. */
 export async function getRoomById(id: number): Promise<RoomItem> {
-  const seedFallback = SEED_ROOMS.find((r) => r.id === id) || SEED_ROOMS[0];
-
-  try {
-    const res = await api.get(`/rooms/${id}`, { timeout: 500 });
-    if (res.data) {
-      const r = res.data;
-      return {
-        id: r.id,
-        apartment_id: r.apartment_id || seedFallback.apartment_id,
-        apartment_name: r.apartment_name || seedFallback.apartment_name,
-        address: r.address || seedFallback.address,
-        city: seedFallback.city,
-        room_type_id: r.room_type_id || seedFallback.room_type_id,
-        room_type_name: r.room_type_name || seedFallback.room_type_name,
-        room_number: r.room_number || seedFallback.room_number,
-        status: r.status || seedFallback.status,
-        base_price: Number(r.base_price) || seedFallback.base_price,
-        max_occupancy: r.max_occupancy || seedFallback.max_occupancy,
-        area: seedFallback.area,
-        bed_type: seedFallback.bed_type,
-        last_maintenance_date: r.last_maintenance_date || seedFallback.last_maintenance_date,
-        images: (r.images && r.images.length > 0) ? r.images : seedFallback.images,
-        amenities: (r.amenities && r.amenities.length > 0) ? r.amenities : seedFallback.amenities,
-        lock: seedFallback.lock,
-        description: seedFallback.description,
-        badge: seedFallback.badge,
-      };
-    }
-  } catch (err) {
-    // Fallback to seed data
-  }
-
-  return seedFallback;
+  const { data: r } = await api.get('/rooms/' + id, { timeout: 15000 });
+  if (!r || Number(r.id) !== id) throw new Error('Không tìm thấy phòng đã chọn.');
+  return {
+    id: Number(r.id),
+    apartment_id: Number(r.apartment_id),
+    apartment_name: r.apartment_name || '',
+    address: r.address || '',
+    city: String(r.address || '').split(',').pop()?.trim() || '',
+    room_type_id: Number(r.room_type_id),
+    room_type_name: r.room_type_name || '',
+    room_type_parent_id: r.room_type_parent_id ? Number(r.room_type_parent_id) : null,
+    room_type_parent_name: r.room_type_parent_name || r.room_type_name || '',
+    room_number: r.room_number || '',
+    status: r.status,
+    base_type_price: Number(r.base_type_price ?? r.base_price),
+    feature_surcharge_per_night: Number(r.feature_surcharge_per_night || 0),
+    features: r.features || [],
+    base_price: Number(r.effective_price_per_night ?? r.base_price),
+    max_occupancy: Number(r.max_occupancy || 2),
+    area: String(r.area || 0) + 'm²',
+    bed_type: r.bed_type || '',
+    last_maintenance_date: r.last_maintenance_date,
+    images: r.images || [],
+    amenities: r.amenities || [],
+    description: r.description || '',
+  };
 }
 
 /**
@@ -511,7 +520,7 @@ export async function getRoomById(id: number): Promise<RoomItem> {
  */
 export async function getApartments(): Promise<ApartmentItem[]> {
   try {
-    const res = await api.get('/apartments', { timeout: 500 });
+    const res = await api.get('/apartments', { timeout: 15000 });
     if (res.data && Array.isArray(res.data) && res.data.length > 0) {
       return res.data.map((item: any) => {
         const match = SEED_APARTMENTS.find((sa) => sa.id === item.id);
@@ -535,7 +544,7 @@ export async function getApartments(): Promise<ApartmentItem[]> {
  */
 export async function getServices(): Promise<ServiceItem[]> {
   try {
-    const res = await api.get('/services', { timeout: 500 });
+    const res = await api.get('/services', { timeout: 15000 });
     if (res.data && Array.isArray(res.data) && res.data.length > 0) {
       return res.data;
     }
@@ -550,7 +559,7 @@ export async function getServices(): Promise<ServiceItem[]> {
  */
 export async function getVouchers(): Promise<VoucherItem[]> {
   try {
-    const res = await api.get('/vouchers', { timeout: 500 });
+    const res = await api.get('/vouchers', { timeout: 15000 });
     if (res.data && Array.isArray(res.data) && res.data.length > 0) {
       return res.data;
     }
@@ -631,6 +640,10 @@ export interface BookingGuestSlot {
 }
 
 export interface SelectedRoomDetail {
+  room_ids?: number[];
+  base_price_per_night?: number;
+  feature_price_per_night?: number;
+  features?: {id:number;name:string;extra_price_per_night:number}[];
   room_type_id: number;
   room_type_name: string;
   room_type_image: string;
@@ -638,9 +651,14 @@ export interface SelectedRoomDetail {
   price: number;
   max_occupancy: number;
   has_extra_bed?: boolean;
+  extra_beds?: number;
 }
 
 export interface BookingDraft {
+  server_booking_id?: number;
+  resume_stage?: 'booker' | 'guests' | 'payment';
+  customer_scope?: 'account' | 'lookup';
+  stay_type?: 'overnight' | 'daytime' | 'fullday';
   id: string;
   booking_code: string;
   apartment_id: number;
@@ -667,6 +685,8 @@ export interface BookingDraft {
   voucher_code?: string;
   discount_amount: number;
   total_price: number;
+  paid_amount?: number;
+  remaining_amount?: number;
   hold_expires_at: number; // timestamp ms
   status:
     | 'pending_info'
@@ -971,37 +991,24 @@ export async function getSimAvailableRoomTypes(criteria: SearchCriteria): Promis
 }
 
 /**
- * Lấy danh sách gợi ý phòng (gọi API backend, nếu lỗi thì fallback sang Simulator Store)
+ * Lấy gợi ý từ hệ thống thực để giá và phòng trống khớp database.
  */
 export async function getRoomRecommendations(criteria: SearchCriteria): Promise<Recommendation[]> {
-  try {
-    const res = await api.get('/rooms/recommendations', {
-      params: {
-        apartment_id: criteria.apartmentId && criteria.apartmentId > 0 ? criteria.apartmentId : undefined,
-        check_in: criteria.checkIn,
-        check_out: criteria.checkOut,
-        stay_type: criteria.stayType,
-        adults: criteria.adults,
-        children: criteria.children,
-        rooms: criteria.rooms,
-        voucher_code: criteria.voucherCode,
-      },
-      timeout: 3000,
-    });
-    if (res.data && Array.isArray(res.data)) {
-      return res.data;
-    }
-  } catch (err) {
-    console.warn('API /rooms/recommendations unreachable, using Simulator recommendation fallback:', err);
-  }
-
-  // Fallback to simulator store using pure recommendWithFallback
-  const apartments = await getApartments();
-  return recommendWithFallback(
-    criteria,
-    (crit) => getSimAvailableRoomTypes(crit),
-    apartments.map((a) => ({ id: a.id, name: a.name }))
-  );
+  const { data } = await api.get('/rooms/recommendations', {
+    params: {
+      apartment_id: criteria.apartmentId && criteria.apartmentId > 0 ? criteria.apartmentId : undefined,
+      check_in: criteria.checkIn,
+      check_out: criteria.checkOut,
+      stay_type: criteria.stayType,
+      adults: criteria.adults,
+      children: criteria.children,
+      rooms: criteria.rooms,
+      voucher_code: criteria.voucherCode,
+    },
+    timeout: 15000,
+  });
+  if (!Array.isArray(data)) throw new Error('Dữ liệu gợi ý phòng không hợp lệ.');
+  return data;
 }
 
 /**
@@ -1009,60 +1016,7 @@ export async function getRoomRecommendations(criteria: SearchCriteria): Promise<
  * Gọi API backend /rooms/baskets, nếu lỗi thì fallback sang Simulator Store
  */
 export async function getRoomBaskets(criteria: SearchCriteria): Promise<Basket[]> {
-  try {
-    const res = await api.get('/rooms/baskets', {
-      params: {
-        apartment_id: criteria.apartmentId && criteria.apartmentId > 0 ? criteria.apartmentId : undefined,
-        check_in: criteria.checkIn,
-        check_out: criteria.checkOut,
-        stay_type: criteria.stayType,
-        adults: criteria.adults,
-        children: criteria.children,
-        rooms: criteria.rooms,
-        voucher_code: criteria.voucherCode,
-        sort: criteria.sort,
-      },
-      timeout: 3000,
-    });
-    if (res.data && Array.isArray(res.data)) {
-      return res.data;
-    }
-  } catch (err) {
-    console.warn('API /rooms/baskets unreachable, using Simulator baskets fallback:', err);
-  }
-
-  // Fallback sang Simulator Store
-  const available = await getSimAvailableRoomTypes(criteria);
-
-  let voucherRule: any = null;
-  if (criteria.voucherCode && criteria.voucherCode.trim().length > 0) {
-    const vouchers = await getVouchers();
-    const match = vouchers.find(
-      (v) => v.code.toUpperCase() === criteria.voucherCode!.trim().toUpperCase()
-    );
-    if (match) {
-      voucherRule = {
-        code: match.code,
-        discount_type: match.discount_type,
-        discount_value: match.discount_value,
-        max_discount_amount: match.max_discount_amount,
-        min_order_value: match.min_order_value,
-      };
-    }
-  }
-
-  let baskets = buildBaskets(criteria, available, DEFAULT_BASKET_CONFIG, voucherRule);
-  if (baskets.length === 0) {
-    baskets = fallbackBaskets(criteria, available, DEFAULT_BASKET_CONFIG, voucherRule);
-  }
-
-  if (criteria.sort === 'price_asc') {
-    baskets.sort((a, b) => a.totalPrice - b.totalPrice);
-  } else if (criteria.sort === 'price_desc') {
-    baskets.sort((a, b) => b.totalPrice - a.totalPrice);
-  }
-
-  return baskets;
+  const { data } = await api.get('/rooms/baskets', { params: { apartment_id: criteria.apartmentId || undefined, check_in: criteria.checkIn, check_out: criteria.checkOut, stay_type: criteria.stayType, adults: criteria.adults, children: criteria.children, rooms: criteria.rooms, sort: criteria.sort }, timeout: 15000 });
+  if (!Array.isArray(data)) throw new Error('Dữ liệu giỏ phòng không hợp lệ.');
+  return data;
 }
-
-

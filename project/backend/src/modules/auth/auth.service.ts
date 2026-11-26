@@ -3,7 +3,7 @@ import { JwtService } from '@nestjs/jwt';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import * as bcrypt from 'bcrypt';
-import { User, Role } from '../../entities/user.entity';
+import { User, Role, Staff } from '../../entities/user.entity';
 
 @Injectable()
 export class AuthService {
@@ -12,6 +12,8 @@ export class AuthService {
     private userRepository: Repository<User>,
     @InjectRepository(Role)
     private roleRepository: Repository<Role>,
+    @InjectRepository(Staff)
+    private staffRepository: Repository<Staff>,
     private jwtService: JwtService,
   ) {}
 
@@ -79,6 +81,45 @@ export class AuthService {
         phone: user.phone,
         role_id: user.role_id,
         role_name: user.role?.role_name,
+      },
+    };
+  }
+
+  async loginStaff(data: { email: string; password: string }) {
+    const email = data.email?.trim().toLowerCase();
+    if (!email || !data.password) {
+      throw new BadRequestException('Vui lòng nhập email và mật khẩu.');
+    }
+
+    const staff = await this.staffRepository.findOne({
+      where: { email },
+      relations: ['role', 'apartment'],
+    });
+    if (!staff || staff.is_blocked || ![1, 2].includes(Number(staff.role_id))) {
+      throw new UnauthorizedException('Email hoặc mật khẩu quản trị không chính xác.');
+    }
+    if (!(await bcrypt.compare(data.password, staff.password_hash))) {
+      throw new UnauthorizedException('Email hoặc mật khẩu quản trị không chính xác.');
+    }
+
+    const role = Number(staff.role_id) === 1 ? 'admin' : 'manager';
+    const payload = {
+      sub: staff.id,
+      staff_id: staff.id,
+      email: staff.email,
+      role_id: staff.role_id,
+      apartment_id: staff.apartment_id ?? null,
+      type: 'staff',
+    };
+    return {
+      access_token: this.jwtService.sign(payload),
+      user: {
+        id: staff.id,
+        name: staff.full_name,
+        email: staff.email,
+        role,
+        branchId: staff.apartment_id ?? undefined,
+        branchName: staff.apartment?.name,
       },
     };
   }

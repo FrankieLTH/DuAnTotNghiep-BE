@@ -1,8 +1,15 @@
+import { computeStayWindow } from '@shared/recommendation';
 import React, { useState, useEffect } from 'react';
 import { Button } from '../components/ui/Button';
 import { Badge } from '../components/ui/Badge';
 import {
   getRoomById,
+  getRoomTypeOptions,
+  getRoomVariants,
+  getVariantCalendar,
+  RoomVariant,
+  VariantCalendar,
+  RoomTypeOption,
   getServices,
   getVouchers,
   RoomItem,
@@ -30,59 +37,55 @@ export const RoomDetailPage: React.FC<RoomDetailPageProps> = ({
   onProceedToCheckout,
 }) => {
   const [room, setRoom] = useState<RoomItem | null>(null);
+  const [variantRoom,setVariantRoom] = useState<RoomItem|null>(null);
   const [services, setServices] = useState<ServiceItem[]>([]);
   const [vouchers, setVouchers] = useState<VoucherItem[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
+  const [availability, setAvailability] = useState<'checking' | 'available' | 'unavailable' | 'invalid'>('checking');
+  const [options, setOptions] = useState<RoomTypeOption[]>([]);
+  const [variants,setVariants] = useState<RoomVariant[]>([]);
+  const [calendar,setCalendar] = useState<VariantCalendar|null>(null);
+  const [calendarMonth,setCalendarMonth] = useState(new Date().toLocaleDateString('sv-SE',{timeZone:'Asia/Bangkok'}).slice(0,7));
+  const [calendarNights,setCalendarNights] = useState(2);
+  const [selectedOptionKey, setSelectedOptionKey] = useState('');
+  const [calendarOpen, setCalendarOpen] = useState(!searchParams?.checkIn);
+  const [rangeAnchor, setRangeAnchor] = useState('');
+  const [extraMattress, setExtraMattress] = useState(false);
 
   // Gallery active photo
   const [activePhotoIdx, setActivePhotoIdx] = useState<number>(0);
 
   // Booking parameters - Sử dụng thông tin từ searchParams nếu có
-  const today = new Date();
-  const tomorrow = new Date(today);
-  tomorrow.setDate(today.getDate() + 1);
-
-  const formatDateStr = (d: Date) => d.toISOString().split('T')[0];
-
-  const [checkInDate, setCheckInDate] = useState(
-    searchParams?.checkIn || formatDateStr(today)
-  );
-  const [checkOutDate, setCheckOutDate] = useState(
-    searchParams?.checkOut || formatDateStr(tomorrow)
-  );
+  // A direct visit to a room type has no booking dates until the guest chooses them.
+  // Preserve dates only when the guest arrived with an explicit search/selected basket.
+  const [checkInDate, setCheckInDate] = useState(searchParams?.checkIn || '');
+  const [checkOutDate, setCheckOutDate] = useState(searchParams?.checkOut || '');
   const [guestCount, setGuestCount] = useState<number>(
     searchParams ? (searchParams.adults || 1) + (searchParams.children || 0) : 2
   );
 
-  // Selected add-on services: Map of serviceId -> boolean
-  const [selectedServiceIds, setSelectedServiceIds] = useState<Record<number, boolean>>({
-    10: !!sourceBasket?.extraMattressTotal, // Tự động chọn nệm phụ nếu giỏ trước đó có chọn
-    1: false, // Thuê xe máy
-    3: true,  // Set BBQ
-  });
+  useEffect(()=>{
+    if(!checkInDate||!checkOutDate)return;
+    const days=Math.round((Date.parse(`${checkOutDate}T00:00:00Z`)-Date.parse(`${checkInDate}T00:00:00Z`))/86400000);
+    if(days>=1&&days<=30)setCalendarNights(days);
+  },[checkInDate,checkOutDate]);
 
-  // Voucher state
-  const [appliedVoucherCode, setAppliedVoucherCode] = useState<string>('WELCOME2026');
-  const [voucherInput, setVoucherInput] = useState<string>('WELCOME2026');
-  const [voucherMsg, setVoucherMsg] = useState<{ text: string; isError: boolean } | null>({
-    text: 'Đã áp dụng mã WELCOME2026 (-10%)',
-    isError: false,
-  });
+  const [selectedServiceIds] = useState<Record<number, boolean>>({});
+  const [appliedVoucherCode] = useState('');
+  const [voucherInput] = useState('');
+  const [voucherMsg] = useState<{text:string;isError:boolean}|null>(null);
 
   useEffect(() => {
     async function loadRoom() {
       try {
         setLoading(true);
-        const [rData, sData, vData] = await Promise.all([
-          getRoomById(roomId),
-          getServices(),
-          getVouchers(),
-        ]);
+        const rData = await getRoomById(roomId);
         setRoom(rData);
-        setServices(sData);
-        setVouchers(vData);
+        setSelectedOptionKey(String(rData.room_type_id));
+        getRoomVariants(rData.room_type_id).then(setVariants).catch(()=>setVariants([]));
+
         setActivePhotoIdx(0);
-        setGuestCount(Math.min(2, rData.max_occupancy));
+        setGuestCount(searchParams?.adults || Math.min(2, rData.max_occupancy));
       } catch (err) {
         console.error('Error fetching room detail:', err);
       } finally {
@@ -92,87 +95,66 @@ export const RoomDetailPage: React.FC<RoomDetailPageProps> = ({
     loadRoom();
   }, [roomId]);
 
+  useEffect(() => {
+    if (!room) return;
+    const todayLocal = new Date();
+    const todayText = `${todayLocal.getFullYear()}-${String(todayLocal.getMonth() + 1).padStart(2, '0')}-${String(todayLocal.getDate()).padStart(2, '0')}`;
+    if (!checkInDate || !checkOutDate || checkInDate < todayText || checkOutDate <= checkInDate || guestCount < 1 || guestCount > Math.max(room.max_occupancy,...variants.map(v=>v.maxOccupancy))) {
+      setAvailability('invalid'); return;
+    }
+    let active = true;
+    setAvailability('checking');
+    getRoomTypeOptions(room.room_type_id, checkInDate, checkOutDate, Math.max(1, guestCount - (searchParams?.children || 0)), { stayType: searchParams?.stayType, children: searchParams?.children || 0, rooms: searchParams?.rooms || 1 })
+      .then(rows => { if (active) { setOptions(rows); setAvailability(rows.some(row=>row.variantKey===selectedOptionKey) ? 'available' : 'unavailable'); } })
+      .catch(() => { if (active) setAvailability('unavailable'); });
+    return () => { active = false; };
+  }, [room, checkInDate, checkOutDate, guestCount, searchParams?.stayType, searchParams?.children, searchParams?.rooms, selectedOptionKey, variants]);
+
+  useEffect(()=>{
+    if(!room)return;
+    let active=true;
+    setCalendar(null);
+    getVariantCalendar(Number(selectedOptionKey)||room.room_type_id,calendarMonth,1).then(value=>{if(active)setCalendar(value);}).catch(()=>{if(active)setCalendar(null);});
+    return ()=>{active=false;};
+  },[room,selectedOptionKey,calendarMonth,calendarNights]);
+
+  useEffect(()=>{
+    const selected=variants.find(v=>String(v.roomTypeId)===selectedOptionKey);
+    if(!selected?.roomId){setVariantRoom(null);return;}
+    let active=true;
+    getRoomById(selected.roomId).then(value=>{if(active)setVariantRoom(value);}).catch(()=>{if(active)setVariantRoom(null);});
+    return ()=>{active=false;};
+  },[variants,selectedOptionKey]);
+
   // Calculate nights
   const dIn = new Date(checkInDate);
   const dOut = new Date(checkOutDate);
   const diffTime = dOut.getTime() - dIn.getTime();
-  const nights = Math.max(1, Math.ceil(diffTime / (1000 * 60 * 60 * 24)) || 1);
+  const stayWindow = computeStayWindow(checkInDate,checkOutDate,searchParams?.stayType||'fullday');
+  const nights = stayWindow.nightsOrDays;
 
-  const basePricePerNight = room ? room.base_price : 0;
-  const roomPriceTotal = basePricePerNight * nights;
+  const chosenOption = options.find(option => option.variantKey === selectedOptionKey);
+  const selectedVariant = variants.find(v=>String(v.roomTypeId)===selectedOptionKey);
+  const displayRoom=variantRoom?.room_type_id===selectedVariant?.roomTypeId?variantRoom:room;
+  const listedPricePerNight = selectedVariant?.basePrice ?? Number(room?.base_type_price ?? room?.base_price ?? 0);
+  const basePricePerNight = chosenOption ? chosenOption.basePricePerNight : 0;
+  const roomPriceTotal = chosenOption?.totalPrice || 0;
 
-  // Add-on services total
-  const servicesTotal = services
-    .filter((s) => selectedServiceIds[s.id])
-    .reduce((sum, s) => sum + Number(s.price), 0);
-
-  // Voucher calculation
-  let discountAmount = 0;
-  const rawSubtotal = roomPriceTotal + servicesTotal;
-
-  if (appliedVoucherCode) {
-    const vMatch = vouchers.find(
-      (v) => v.code.toUpperCase() === appliedVoucherCode.toUpperCase()
-    );
-    if (vMatch) {
-      if (rawSubtotal >= vMatch.min_order_value) {
-        if (vMatch.discount_type === 'percentage') {
-          discountAmount = (rawSubtotal * vMatch.discount_value) / 100;
-          if (vMatch.max_discount_amount && discountAmount > vMatch.max_discount_amount) {
-            discountAmount = vMatch.max_discount_amount;
-          }
-        } else {
-          discountAmount = vMatch.discount_value;
-        }
-      }
-    }
-  }
-
-  const totalPrice = Math.max(0, rawSubtotal - discountAmount);
-
-  const handleApplyVoucher = () => {
-    const code = voucherInput.trim().toUpperCase();
-    if (!code) {
-      setAppliedVoucherCode('');
-      setVoucherMsg(null);
-      return;
-    }
-
-    const found = vouchers.find((v) => v.code.toUpperCase() === code);
-    if (!found) {
-      setVoucherMsg({ text: `Mã "${code}" không hợp lệ hoặc đã hết hạn!`, isError: true });
-      return;
-    }
-
-    if (rawSubtotal < found.min_order_value) {
-      setVoucherMsg({
-        text: `Đơn hàng tối thiểu phải từ ${found.min_order_value.toLocaleString('vi-VN')}đ`,
-        isError: true,
-      });
-      return;
-    }
-
-    setAppliedVoucherCode(code);
-    setVoucherMsg({ text: `Áp dụng thành công mã ${code}!`, isError: false });
-  };
-
-  const handleToggleService = (sId: number) => {
-    setSelectedServiceIds((prev) => ({
-      ...prev,
-      [sId]: !prev[sId],
-    }));
-  };
+  const servicesTotal = extraMattress ? 150000 * nights : 0;
+  const discountAmount = 0;
+  const totalPrice = roomPriceTotal + servicesTotal;
 
   const handleProceedWithBasket = () => {
     if (!sourceBasket || !room) return;
 
     const selectedBookingRooms = sourceBasket.items.map((it) => ({
       room_type_id: it.roomTypeId,
+      room_ids:it.roomIds,features:it.features||[],feature_price_per_night:it.featurePricePerNight||0,
       room_type_name: it.roomTypeName,
       room_type_image: it.image || room.images[0] || 'https://images.unsplash.com/photo-1590490360182-c33d57733427?auto=format&fit=crop&w=800&q=80',
       count: it.quantity,
-      price: it.basePrice || Math.round(it.unitPrice / nights),
-      max_occupancy: 2,
+      price: Math.round(it.unitPrice / nights),
+      max_occupancy: it.maxOccupancy || 2,
       has_extra_bed: it.hasExtraMattress,
     }));
 
@@ -227,12 +209,13 @@ export const RoomDetailPage: React.FC<RoomDetailPageProps> = ({
       total_capacity: sourceBasket.totalCapacity + (sourceBasket.extraMattressTotal ? 1 : 0),
       has_extra_bed: !!sourceBasket.extraMattressTotal,
       extra_bed_fee: sourceBasket.extraMattressTotal || 0,
+      stay_type: (searchParams?.stayType || 'fullday') as BookingDraft['stay_type'],
       check_in_date: checkInDate,
       check_out_date: checkOutDate,
       nights,
       num_adults: numAdults,
       num_children: numChildren,
-      children_ages: searchParams?.childrenAges || [],
+      children_ages: [],
       price_breakdown: [
         {
           date: checkInDate,
@@ -243,7 +226,7 @@ export const RoomDetailPage: React.FC<RoomDetailPageProps> = ({
           finalPricePerRoom: room.base_price,
         },
       ],
-      room_subtotal: sourceBasket.totalPrice,
+      room_subtotal: sourceBasket.totalPrice - (sourceBasket.extraMattressTotal || 0),
       extra_fee_total: sourceBasket.extraMattressTotal || 0,
       service_total: 0,
       discount_amount: sourceBasket.discountAmount || 0,
@@ -264,11 +247,16 @@ export const RoomDetailPage: React.FC<RoomDetailPageProps> = ({
     onProceedToCheckout(draft);
   };
 
-  const handleProceedSingleRoom = () => {
-    if (!room) return;
-    const hasExtraMattress = !!selectedServiceIds[10];
-    const extraMattressFee = hasExtraMattress ? 150000 * nights : 0;
-    const finalRoomPrice = totalPrice;
+  const handleProceedSingleRoom = (optionOverride?: RoomTypeOption) => {
+    const option = optionOverride || chosenOption;
+    const variant = optionOverride ? variants.find(v => v.roomTypeId === optionOverride.roomTypeId) : selectedVariant;
+    if (!room || !option?.roomIds?.length) return;
+    const nightly = option.basePricePerNight;
+    const roomTotal = option.totalPrice;
+    const stayNights = option.nights;
+    const hasExtraMattress = extraMattress;
+    const extraMattressFee = hasExtraMattress ? 150000 * stayNights : 0;
+    const finalRoomPrice = roomTotal + extraMattressFee;
 
     const draft: BookingDraft = {
       id: `draft_${Date.now()}`,
@@ -276,43 +264,45 @@ export const RoomDetailPage: React.FC<RoomDetailPageProps> = ({
       apartment_id: room.apartment_id,
       apartment_name: room.apartment_name,
       apartment_address: room.address,
-      room_type_id: room.room_type_id || room.id,
-      room_type_name: room.room_type_name,
-      room_type_image: room.images[0] || '',
+      room_type_id: option.roomTypeId,
+      room_type_name: option.name,
+      room_type_image: displayRoom?.images[0] || room.images[0] || '',
       num_rooms: 1,
       booking_rooms: [
         {
-          room_type_id: room.room_type_id || room.id,
-          room_type_name: room.room_type_name,
-          room_type_image: room.images[0] || '',
+          room_type_id: option.roomTypeId,
+          room_ids:[option.roomIds[0]],features:[],feature_price_per_night:0,
+          room_type_name: option.name,
+          room_type_image: displayRoom?.images[0] || room.images[0] || '',
           count: 1,
-          price: room.base_price,
-          max_occupancy: room.max_occupancy + (hasExtraMattress ? 1 : 0),
+          price: nightly,
+          max_occupancy: (variant?.maxOccupancy||room.max_occupancy) + (hasExtraMattress ? 1 : 0),
           has_extra_bed: hasExtraMattress,
         },
       ],
-      total_capacity: room.max_occupancy + (hasExtraMattress ? 1 : 0),
+      total_capacity: (variant?.maxOccupancy||room.max_occupancy) + (hasExtraMattress ? 1 : 0),
       has_extra_bed: hasExtraMattress,
       extra_bed_fee: extraMattressFee,
+      stay_type: (searchParams?.stayType || 'fullday') as BookingDraft['stay_type'],
       check_in_date: checkInDate,
       check_out_date: checkOutDate,
-      nights,
-      num_adults: searchParams?.adults || Math.min(guestCount, room.max_occupancy),
-      num_children: searchParams?.children || 0,
+      nights: stayNights,
+      num_adults: guestCount,
+      num_children: 0,
       children_ages: searchParams?.childrenAges || [],
       price_breakdown: [
         {
           date: checkInDate,
           dayOfWeek: 'Ngày nhận phòng',
-          basePrice: room.base_price,
+          basePrice: nightly,
           extraFeePercent: 0,
           extraFeeAmount: 0,
-          finalPricePerRoom: room.base_price,
+          finalPricePerRoom: nightly,
         },
       ],
-      room_subtotal: roomPriceTotal,
+      room_subtotal: roomTotal,
       extra_fee_total: extraMattressFee,
-      service_total: servicesTotal,
+      service_total: 0,
       discount_amount: discountAmount,
       total_price: finalRoomPrice,
       hold_expires_at: Date.now() + 30 * 60 * 1000,
@@ -367,24 +357,13 @@ export const RoomDetailPage: React.FC<RoomDetailPageProps> = ({
     );
   }
 
-  const roomTitle = `Phòng ${room.room_number} - ${room.room_type_name}`;
-  const galleryPhotos = room.images.length > 0 ? room.images : [
+  const roomTitle = room.room_type_parent_name || room.room_type_name;
+  const galleryPhotos = (displayRoom?.images||room.images).length > 0 ? (displayRoom?.images||room.images) : [
     'https://images.unsplash.com/photo-1590490360182-c33d57733427?auto=format&fit=crop&w=800&q=80',
   ];
 
-  const statusBadgeVariant =
-    room.status === 'available'
-      ? 'feature-green'
-      : room.status === 'occupied'
-      ? 'warning'
-      : 'error';
-
-  const statusLabel =
-    room.status === 'available'
-      ? 'Phòng Sẵn Sàng Đón Khách'
-      : room.status === 'occupied'
-      ? 'Phòng Đang Có Khách'
-      : 'Đang Bảo Dưỡng Trang Thiết Bị';
+  const statusBadgeVariant = availability === 'available' ? 'feature-green' : 'warning';
+  const statusLabel = availability === 'available' ? 'Có phương án còn trống theo ngày đã chọn' : availability === 'invalid' ? 'Khoảng ngày hoặc số khách không hợp lệ (ngày nhận phải từ hôm nay). Chọn ngày xanh trên lịch.' : availability === 'unavailable' ? 'Hết phòng trong khoảng ngày đã chọn. Xem ngày còn trống gợi ý bên dưới.' : 'Chọn ngày để xem phòng trống';
 
   return (
     <div className="bg-[#FAF7F2] min-h-screen pb-16 font-sans">
@@ -408,7 +387,7 @@ export const RoomDetailPage: React.FC<RoomDetailPageProps> = ({
               <div className="flex flex-wrap items-center gap-2 mb-2">
                 <Badge variant="signature">📍 {room.apartment_name}</Badge>
                 <Badge variant={statusBadgeVariant}>● {statusLabel}</Badge>
-                <Badge variant="smartpin">🔑 TTLock: {room.lock?.cloud_lock_id || 'Smart Lock 24/7'}</Badge>
+
               </div>
               <h1 className="text-3xl lg:text-4xl font-serif font-bold text-[#3E2C23]">
                 {roomTitle}
@@ -467,25 +446,25 @@ export const RoomDetailPage: React.FC<RoomDetailPageProps> = ({
             {/* 1. Tổng Quan Không Gian */}
             <section className="bg-white p-6 sm:p-7 rounded-3xl border border-[#E8DFD1] space-y-4 shadow-sm">
               <h2 className="text-xl font-serif font-bold text-[#3E2C23] flex items-center gap-2">
-                🏡 Tổng Quan Không Gian Phòng {room.room_number}
+                🏡 Tổng Quan Loại Phòng
               </h2>
               <p className="text-sm font-sans text-[#7A6B63] leading-relaxed">
-                {room.description}
+                {displayRoom?.description||room.description}
               </p>
 
               {/* 4 Box thông số */}
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-4 border-t border-[#F2ECE1] text-center">
                 <div className="bg-[#FAF7F2] p-3 rounded-2xl border border-[#E8DFD1]">
                   <span className="text-[11px] text-[#8C7A70] block uppercase font-bold">Diện tích</span>
-                  <span className="text-sm font-bold text-[#3E2C23]">{room.area}</span>
+                  <span className="text-sm font-bold text-[#3E2C23]">{displayRoom?.area||room.area}</span>
                 </div>
                 <div className="bg-[#FAF7F2] p-3 rounded-2xl border border-[#E8DFD1]">
                   <span className="text-[11px] text-[#8C7A70] block uppercase font-bold">Sức chứa</span>
-                  <span className="text-sm font-bold text-[#3E2C23]">{room.max_occupancy} Khách</span>
+                  <span className="text-sm font-bold text-[#3E2C23]">{selectedVariant?.maxOccupancy||room.max_occupancy} Khách</span>
                 </div>
                 <div className="bg-[#FAF7F2] p-3 rounded-2xl border border-[#E8DFD1]">
                   <span className="text-[11px] text-[#8C7A70] block uppercase font-bold">Giường ngủ</span>
-                  <span className="text-xs font-bold text-[#3E2C23] truncate block">{room.bed_type}</span>
+                  <span className="text-xs font-bold text-[#3E2C23] truncate block">{displayRoom?.bed_type||room.bed_type}</span>
                 </div>
                 <div className="bg-[#FAF7F2] p-3 rounded-2xl border border-[#E8DFD1]">
                   <span className="text-[11px] text-[#8C7A70] block uppercase font-bold">Khóa cửa</span>
@@ -501,12 +480,12 @@ export const RoomDetailPage: React.FC<RoomDetailPageProps> = ({
                   ✨ Tiện Nghi Có Sẵn Trong Phòng
                 </h2>
                 <span className="text-xs text-[#C85A32] font-semibold bg-[#C85A32]/10 px-3 py-1 rounded-full">
-                  {room.amenities.length} Tiện ích chuẩn
+                  {(displayRoom?.amenities||room.amenities).length} Tiện ích đã gồm
                 </span>
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5 pt-2">
-                {room.amenities.map((amenity) => (
+                {(displayRoom?.amenities||room.amenities).map((amenity) => (
                   <div
                     key={amenity.id}
                     className="flex items-start gap-3 p-3.5 rounded-2xl bg-[#FAF7F2] border border-[#E8DFD1]/80 hover:border-[#C85A32]/50 transition-colors"
@@ -521,46 +500,12 @@ export const RoomDetailPage: React.FC<RoomDetailPageProps> = ({
                   </div>
                 ))}
               </div>
+              {!(displayRoom?.amenities||room.amenities).length && <p className="text-sm text-[#7A6B63]">Loại phòng này chưa được gán tiện ích trong quản trị. Vui lòng liên hệ homestay để xác nhận trước khi đặt.</p>}
             </section>
 
-            {/* 3. Tích hợp Khóa Thông Minh TTLock */}
-            <section className="bg-[#2D1D16] text-white p-6 sm:p-7 rounded-3xl space-y-4 shadow-md relative overflow-hidden">
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-bold tracking-widest text-[#E07A5F] uppercase">
-                  TỰ ĐỘNG HÓA NHẬN PHÒNG KHÔNG CHẠM
-                </span>
-                <span className="text-[11px] font-mono bg-white/10 px-2.5 py-1 rounded-full text-white/90">
-                  {room.lock?.cloud_lock_id || 'LOCK_TTLOCK'}
-                </span>
-              </div>
-
-              <h2 className="text-xl font-serif font-bold text-white">
-                3 Bước Nhận Phòng Tự Động Với Khóa TTLock {room.room_number}
-              </h2>
-
-              <p className="text-xs text-white/70 font-light leading-relaxed">
-                Sau khi thanh toán hoàn tất, hệ thống tự động đồng bộ API tạo mã PIN số có hiệu lực đúng theo khoảng thời gian bạn đăng ký lưu trú.
-              </p>
-
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-2">
-                <div className="bg-white/10 p-4 rounded-2xl border border-white/10 space-y-1.5">
-                  <span className="text-[#E07A5F] font-mono font-bold text-lg">01.</span>
-                  <h4 className="text-xs font-bold text-white">Thanh Toán Trực Tuyến</h4>
-                  <p className="text-[11px] text-white/70">Xác nhận thanh toán qua PayOS/QR tức thì.</p>
-                </div>
-
-                <div className="bg-white/10 p-4 rounded-2xl border border-white/10 space-y-1.5">
-                  <span className="text-[#E07A5F] font-mono font-bold text-lg">02.</span>
-                  <h4 className="text-xs font-bold text-white">Nhận Mã PIN Cửa</h4>
-                  <p className="text-[11px] text-white/70">Mã PIN cá nhân gửi qua Zalo/Email trước giờ check-in.</p>
-                </div>
-
-                <div className="bg-white/10 p-4 rounded-2xl border border-white/10 space-y-1.5">
-                  <span className="text-[#E07A5F] font-mono font-bold text-lg">03.</span>
-                  <h4 className="text-xs font-bold text-white">Chạm & Mở Cửa</h4>
-                  <p className="text-[11px] text-white/70">Bấm số PIN + phím # trên khóa cửa phòng {room.room_number}.</p>
-                </div>
-              </div>
+            <section className="bg-[#2D1D16] text-white p-6 rounded-3xl">
+              <h2 className="font-serif text-xl">Nhận phòng tự động</h2>
+              <p className="text-sm mt-2 text-white/80">Số phòng và mã vào cửa được thông báo khi đơn đã thanh toán, xác nhận phân phòng và đến thời gian nhận phòng.</p>
             </section>
           </div>
 
@@ -575,179 +520,89 @@ export const RoomDetailPage: React.FC<RoomDetailPageProps> = ({
                   </span>
                   <div className="flex items-baseline gap-1">
                     <span className="text-3xl font-bold font-serif text-[#C85A32]">
-                      {room.base_price.toLocaleString('vi-VN')}đ
+                      {listedPricePerNight.toLocaleString('vi-VN')}đ
                     </span>
                     <span className="text-xs font-sans text-[#7A6B63]">/ đêm</span>
                   </div>
                 </div>
-                <Badge variant="signature">Phòng {room.room_number}</Badge>
+                <Badge variant="signature">Loại phòng</Badge>
               </div>
 
-              {/* Form Controls: Dates & Guests */}
-              <div className="space-y-4">
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="text-xs font-semibold text-[#3E2C23] block mb-1">
-                      Nhận phòng (Check-in)
-                    </label>
-                    <input
-                      type="date"
-                      value={checkInDate}
-                      onChange={(e) => setCheckInDate(e.target.value)}
-                      className="w-full bg-[#FAF7F2] border border-[#E8DFD1] rounded-xl px-3 py-2 text-xs font-sans outline-none focus:border-[#C85A32]"
-                    />
-                  </div>
-                  <div>
-                    <label className="text-xs font-semibold text-[#3E2C23] block mb-1">
-                      Trả phòng (Check-out)
-                    </label>
-                    <input
-                      type="date"
-                      value={checkOutDate}
-                      onChange={(e) => setCheckOutDate(e.target.value)}
-                      className="w-full bg-[#FAF7F2] border border-[#E8DFD1] rounded-xl px-3 py-2 text-xs font-sans outline-none focus:border-[#C85A32]"
-                    />
-                  </div>
+                            {/* Date-range bar (Booking.com style): pick check-in then check-out on a range calendar */}
+              <div className="space-y-3">
+                <div className="grid grid-cols-2 gap-2">
+                  <button type="button" onClick={() => setCalendarOpen(o => !o)} className={`text-left bg-[#FAF7F2] border rounded-xl px-3 py-2.5 ${!checkInDate ? 'border-[#C85A32] ring-1 ring-[#C85A32]' : 'border-[#E8DFD1]'}`}>
+                    <span className="block text-[10px] uppercase font-bold text-[#8C7A70]">Nhận phòng</span>
+                    <span className="block text-sm font-semibold text-[#3E2C23]">{checkInDate ? checkInDate.split('-').reverse().join('/') : 'Chọn ngày'}</span>
+                  </button>
+                  <button type="button" onClick={() => setCalendarOpen(o => !o)} className={`text-left bg-[#FAF7F2] border rounded-xl px-3 py-2.5 ${checkInDate && !checkOutDate ? 'border-[#C85A32] ring-1 ring-[#C85A32]' : 'border-[#E8DFD1]'}`}>
+                    <span className="block text-[10px] uppercase font-bold text-[#8C7A70]">Trả phòng</span>
+                    <span className="block text-sm font-semibold text-[#3E2C23]">{checkOutDate ? checkOutDate.split('-').reverse().join('/') : 'Chọn ngày'}</span>
+                  </button>
                 </div>
-
-                <div>
-                  <label className="text-xs font-semibold text-[#3E2C23] block mb-1">
-                    Số lượng khách lưu trú
-                  </label>
-                  <select
-                    value={guestCount}
-                    onChange={(e) => setGuestCount(Number(e.target.value))}
-                    className="w-full bg-[#FAF7F2] border border-[#E8DFD1] rounded-xl px-3 py-2.5 text-xs font-sans outline-none focus:border-[#C85A32]"
-                  >
-                    {Array.from({ length: room.max_occupancy }, (_, i) => i + 1).map((n) => (
-                      <option key={n} value={n}>
-                        {n} Khách {n === room.max_occupancy ? '(Tối đa)' : ''}
-                      </option>
-                    ))}
+                <div className="flex items-center gap-2">
+                  <label className="text-xs font-semibold text-[#3E2C23]">Số khách</label>
+                  <select value={guestCount} onChange={(e) => setGuestCount(Number(e.target.value))} className="flex-1 bg-[#FAF7F2] border border-[#E8DFD1] rounded-xl px-3 py-2 text-xs">
+                    {Array.from({ length: Math.max(room.max_occupancy, ...variants.map(v => v.maxOccupancy)) }, (_, i) => i + 1).map(n => (<option key={n} value={n}>{n} khách</option>))}
                   </select>
                 </div>
-              </div>
-
-              {/* Add-on Services from Database (services table) */}
-              <div className="space-y-2.5 pt-2 border-t border-[#F2ECE1]">
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-bold text-[#3E2C23] block">
-                    🎁 Dịch vụ tiện ích gia tăng (Bảng Services DB):
-                  </span>
-                </div>
-
-                {services.map((svc) => (
-                  <label
-                    key={svc.id}
-                    className="flex items-start gap-2.5 text-xs text-[#3E2C23] cursor-pointer p-2.5 rounded-xl hover:bg-[#FAF7F2] transition-colors border border-transparent hover:border-[#E8DFD1]"
-                  >
-                    <input
-                      type="checkbox"
-                      checked={!!selectedServiceIds[svc.id]}
-                      onChange={() => handleToggleService(svc.id)}
-                      className="accent-[#C85A32] mt-0.5"
-                    />
-                    <div className="flex-1">
-                      <span className="font-semibold block">{svc.name}</span>
-                      <span className="text-[11px] text-[#8C7A70] line-clamp-1">{svc.description}</span>
+                {(!checkInDate || !checkOutDate) && <p className="text-xs bg-[#FFF4E8] border border-[#E8C9A8] text-[#8A5A2B] rounded-lg px-3 py-2">Chọn ngày nhận rồi ngày trả trên lịch để xem giá trọn kỳ và phòng trống.</p>}
+                {calendarOpen && (
+                  <div className="border border-[#E8DFD1] rounded-xl p-3 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <button type="button" onClick={() => setCalendarMonth(m => { const [y, mo] = m.split('-').map(Number); const d = new Date(y, mo - 2, 1); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`; })} className="px-2 py-1 text-xs border rounded">‹</button>
+                      <span className="text-xs font-semibold">{calendarMonth}</span>
+                      <button type="button" onClick={() => setCalendarMonth(m => { const [y, mo] = m.split('-').map(Number); const d = new Date(y, mo, 1); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`; })} className="px-2 py-1 text-xs border rounded">›</button>
                     </div>
-                    <span className="font-bold text-[#C85A32] shrink-0">
-                      +{Number(svc.price).toLocaleString('vi-VN')}đ
-                    </span>
-                  </label>
-                ))}
-              </div>
-
-              {/* Voucher Input */}
-              <div className="pt-2 border-t border-[#F2ECE1] space-y-2">
-                <label className="text-xs font-bold text-[#3E2C23] block">
-                  🎟️ Mã giảm giá (Bảng Vouchers DB):
-                </label>
-                <div className="flex gap-2">
-                  <input
-                    type="text"
-                    value={voucherInput}
-                    onChange={(e) => setVoucherInput(e.target.value)}
-                    placeholder="Nhập WELCOME2026 hoặc SUMMERVIP"
-                    className="flex-1 bg-[#FAF7F2] border border-[#E8DFD1] rounded-xl px-3 py-2 text-xs font-mono uppercase outline-none focus:border-[#C85A32]"
-                  />
-                  <button
-                    onClick={handleApplyVoucher}
-                    className="bg-[#3E2C23] text-white px-3.5 py-2 rounded-xl text-xs font-semibold hover:bg-[#2D1D16] transition-colors cursor-pointer"
-                  >
-                    Áp dụng
-                  </button>
-                </div>
-                {voucherMsg && (
-                  <p className={`text-[11px] ${voucherMsg.isError ? 'text-rose-600' : 'text-emerald-700'} font-medium`}>
-                    {voucherMsg.text}
-                  </p>
-                )}
-              </div>
-
-              {/* Price Calculation Summary */}
-              <div className="bg-[#FAF7F2] p-4 rounded-2xl border border-[#E8DFD1] space-y-2 text-xs">
-                <div className="flex justify-between text-[#7A6B63]">
-                  <span>Tiền phòng ({nights} đêm x {room.base_price.toLocaleString('vi-VN')}đ):</span>
-                  <span className="font-semibold text-[#3E2C23]">{roomPriceTotal.toLocaleString('vi-VN')}đ</span>
-                </div>
-
-                {servicesTotal > 0 && (
-                  <div className="flex justify-between text-[#7A6B63]">
-                    <span>Dịch vụ tiện ích chọn thêm:</span>
-                    <span className="font-semibold text-[#3E2C23]">+{servicesTotal.toLocaleString('vi-VN')}đ</span>
+                    <div className="grid grid-cols-7 gap-1 text-center text-[10px] text-[#8C7A70]">{['T2', 'T3', 'T4', 'T5', 'T6', 'T7', 'CN'].map(d => <span key={d}>{d}</span>)}</div>
+                    <div className="grid grid-cols-7 gap-1">
+                      {calendar?.days.map(day => {
+                        const inRange = checkInDate && checkOutDate && day.date >= checkInDate && day.date <= checkOutDate;
+                        const isEdge = day.date === checkInDate || day.date === checkOutDate;
+                        const disabled = day.status !== 'available';
+                        return <button key={day.date} type="button" disabled={disabled} title={disabled ? 'Hết phòng' : `Còn ${day.availableCount} phòng`} onClick={() => { if (!rangeAnchor || day.date <= rangeAnchor) { setRangeAnchor(day.date); setCheckInDate(day.date); setCheckOutDate(''); } else { setCheckOutDate(day.date); setRangeAnchor(''); } }} className={`rounded p-1 text-xs ${disabled ? 'bg-stone-100 text-stone-400' : isEdge ? 'bg-[#C85A32] text-white' : inRange ? 'bg-[#F3D9C4] text-[#7A4A22]' : 'bg-emerald-50 text-emerald-800 hover:bg-emerald-200'}`}>{Number(day.date.slice(-2))}</button>;
+                      })}
+                    </div>
+                    <p className="text-[11px] text-[#795341]">Bấm ngày nhận, rồi bấm ngày trả. Ngày xám = hết phòng.</p>
                   </div>
                 )}
-
-                {discountAmount > 0 && (
-                  <div className="flex justify-between text-emerald-700 font-medium">
-                    <span>Mã ưu đãi {appliedVoucherCode}:</span>
-                    <span>-{discountAmount.toLocaleString('vi-VN')}đ</span>
-                  </div>
-                )}
-
-                <div className="flex justify-between text-sm font-bold text-[#3E2C23] pt-2 border-t border-[#E8DFD1]">
-                  <span>Tổng tiền thanh toán:</span>
-                  <span className="text-xl font-serif text-[#C85A32]">
-                    {totalPrice.toLocaleString('vi-VN')}đ
-                  </span>
-                </div>
               </div>
 
-              {/* CTA Action */}
-              {sourceBasket ? (
-                <div className="space-y-2.5">
-                  <Button
-                    variant="primary"
-                    size="lg"
-                    className="w-full font-bold uppercase tracking-wider shadow-md hover:shadow-lg transition-all"
-                    disabled={room.status !== 'available'}
-                    onClick={handleProceedWithBasket}
-                  >
-                    <span>Tiếp tục đặt trọn Giỏ này ({sourceBasket.totalRooms} phòng) →</span>
-                  </Button>
+              {/* Offer rows: whole-stay price + conditions + scarcity + per-row Reserve (Booking.com room table) */}
+              <div className="space-y-3 border-t pt-4">
+                <h3 className="font-semibold text-sm">Chọn hạng phòng &amp; giá trọn kỳ</h3>
+                {variants.map(variant => {
+                  const offer = options.find(o => o.roomTypeId === variant.roomTypeId);
+                  const canReserve = !!offer?.roomIds?.length;
+                  return (
+                    <div key={variant.roomTypeId} className={`border rounded-xl p-3 space-y-2 ${selectedOptionKey === String(variant.roomTypeId) ? 'border-[#C85A32] ring-1 ring-[#C85A32]' : 'border-[#E8DFD1]'} ${!checkInDate || !checkOutDate ? 'opacity-70' : ''}`}>
+                      <div className="flex items-start justify-between gap-2">
+                        <div>
+                          <strong className="text-sm text-[#3E2C23]">{variant.variantLabel}</strong>
+                          <span className="block text-[11px] text-[#795341]">{variant.maxOccupancy} khách · {variant.basePrice.toLocaleString('vi-VN')}đ/đêm</span>
+                          {(variant.amenities || []).length > 0 && (<span className="flex flex-wrap gap-1 mt-1">{(variant.amenities || []).map(a => (<span key={a.id} className="text-[10px] px-1.5 py-0.5 rounded bg-[#F2ECE1] text-[#5C534B]">{a.name}</span>))}</span>)}
+                          <span className="inline-block mt-1 text-[10px] px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">Hủy trước nhận phòng · hoàn 50% (duyệt)</span>
+                        </div>
+                        <div className="text-right">
+                          {offer ? (<><span className="block text-lg font-serif font-bold text-[#C85A32]">{offer.totalPrice.toLocaleString('vi-VN')}đ</span><span className="block text-[10px] text-[#795341]">{offer.nights} đêm · {offer.basePricePerNight.toLocaleString('vi-VN')}đ/đêm</span></>) : (<span className="block text-xs text-[#795341]">{!checkInDate || !checkOutDate ? 'Chọn ngày để xem giá' : 'Hết phòng khoảng ngày này'}</span>)}
+                        </div>
+                      </div>
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-[11px] text-[#B4532A] font-semibold">{offer ? (offer.availableCount === 1 ? 'Chỉ còn 1 phòng ở mức giá này' : `Còn ${offer.availableCount} phòng`) : ''}</span>
+                        <button type="button" disabled={!canReserve} onClick={() => { setSelectedOptionKey(String(variant.roomTypeId)); handleProceedSingleRoom(offer); }} className={`px-4 py-2 rounded-xl text-xs font-bold ${canReserve ? 'bg-[#C85A32] text-white hover:bg-[#A8481F]' : 'bg-stone-200 text-stone-400 cursor-not-allowed'}`}>Đặt</button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
 
-                  <button
-                    type="button"
-                    onClick={handleProceedSingleRoom}
-                    className="w-full bg-white hover:bg-[#F2ECE1] text-[#3E2C23] border border-[#D0C8BC] py-2.5 px-4 rounded-xl text-xs font-bold transition-colors cursor-pointer"
-                  >
-                    Chỉ đặt riêng phòng này ({totalPrice.toLocaleString('vi-VN')}đ)
-                  </button>
-                </div>
-              ) : (
-                <Button
-                  variant="primary"
-                  size="lg"
-                  className="w-full font-bold uppercase tracking-wider"
-                  disabled={room.status !== 'available'}
-                  onClick={handleProceedSingleRoom}
-                >
-                  {room.status === 'available' ? '🔒 Đặt Phòng & Nhận Mã PIN' : 'Phòng Hiện Không Sẵn Sàng'}
+              <label className="flex items-center gap-2 text-sm border-t pt-3"><input type="checkbox" checked={extraMattress} onChange={e => setExtraMattress(e.target.checked)} /> Nệm phụ</label>
+
+              {sourceBasket && (
+                <Button variant="primary" size="lg" className="w-full font-bold uppercase tracking-wider" disabled={room.status !== 'available'} onClick={handleProceedWithBasket}>
+                  <span>Tiếp tục đặt trọn Giỏ này ({sourceBasket.totalRooms} phòng) →</span>
                 </Button>
-              )}
-
-              <div className="text-[11px] text-center text-[#8C7A70] space-y-1">
+              )}<div className="text-[11px] text-center text-[#8C7A70] space-y-1">
                 <p>⚡ Nhận phòng tự động 24/7 với Smart Lock TTLock</p>
                 <p>📞 Hotline quản gia 24/7: <strong>0901.234.567</strong></p>
               </div>

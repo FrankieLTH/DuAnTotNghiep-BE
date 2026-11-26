@@ -239,6 +239,9 @@ export class Booking {
   @Column({ type: 'text', nullable: true })
   note: string;
 
+  @Column({ type: 'json', nullable: true })
+  checkout_data: { booker?: { full_name: string; email: string; phone: string; is_staying: boolean; consent_data_protection: boolean }; guests?: any[]; requests?: any[]; extras?: { extra_beds_by_type: Record<string, number>; extra_bed_nightly_rate: number; extra_bed_total: number } };
+
   @Column({ type: 'text', nullable: true })
   cancel_reason: string;
 
@@ -260,6 +263,7 @@ export class Booking {
 
   @Column({ type: 'datetime', nullable: true })
   hold_expires_at: Date;
+
 
   @Column({ default: false })
   is_archived: boolean;
@@ -381,6 +385,9 @@ export class BookingRoom {
 
   @Column('decimal', { precision: 12, scale: 2, default: 0 })
   unit_price: number;
+
+  @Column({ type: 'json', nullable: true })
+  pricing_snapshot: any;
 
   @CreateDateColumn()
   created_at: Date;
@@ -543,6 +550,9 @@ export class Payment {
   @Column({ type: 'datetime', nullable: true })
   paid_at: Date;
 
+  @Column({ type: 'json', nullable: true })
+  provider_data: { order_code: number; hold_until: string; link_id?: string; checkout_url?: string; provider_status?: string; review_required?: boolean; received_amount?: number; wallet_reserved?: number };
+
   @CreateDateColumn()
   created_at: Date;
 }
@@ -552,7 +562,7 @@ export class Refund {
   @PrimaryGeneratedColumn()
   id: number;
 
-  @Column()
+  @Column({ nullable: true })
   payment_id: number;
 
   @Column()

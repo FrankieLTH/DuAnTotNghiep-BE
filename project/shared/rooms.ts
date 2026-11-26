@@ -40,7 +40,7 @@ export interface GenerateRoomNumbersOptions {
 
 export interface BatchRoomGroup {
   label: string;
-  roomGroupId?: number | null;
+  roomGroupId?: number | string | null;
   roomTypeId: number;
   featureIds: number[];
   note?: string;
@@ -56,7 +56,7 @@ export interface BatchCommonConfig {
 export interface BatchRoomPlan {
   roomNumber: string;
   floor: number | null;
-  roomGroupId?: number | null;
+  roomGroupId?: number | string | null;
   roomTypeId: number;
   featureIds: number[];     // merged: common + group (deduped)
   note?: string;

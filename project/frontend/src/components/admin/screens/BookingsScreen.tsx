@@ -1,3 +1,4 @@
+import { CustomerRequestsPanel } from '../CustomerRequestsPanel';
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   TableContainer,
@@ -89,18 +90,6 @@ function calcNights(start: string, end: string): number {
   return Math.max(1, Math.ceil((e.getTime() - s.getTime()) / 86400000));
 }
 
-function daysUntilCheckin(booked_start_time: string): number {
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  const checkin = new Date(booked_start_time);
-  checkin.setHours(0, 0, 0, 0);
-  return Math.ceil((checkin.getTime() - today.getTime()) / 86400000);
-}
-
-function isRefundEligible(booked_start_time: string): boolean {
-  return daysUntilCheckin(booked_start_time) > 10;
-}
-
 function formatCountdown(holdExpiresAt: string | undefined): { text: string; urgent: boolean } {
   if (!holdExpiresAt) return { text: '—', urgent: false };
   const remaining = Math.max(0, Math.floor((new Date(holdExpiresAt).getTime() - Date.now()) / 1000));
@@ -165,11 +154,6 @@ export const BookingsScreen: React.FC<BookingsScreenProps> = ({
   const [hasSurcharge, setHasSurcharge] = useState(false);
   const [inspectionSurcharge, setInspectionSurcharge] = useState('');
   const [inspectionSubmitting, setInspectionSubmitting] = useState(false);
-
-  // ---- Refund confirm ----
-  const [showRefundConfirm, setShowRefundConfirm] = useState(false);
-  const [refundTarget, setRefundTarget] = useState<any | null>(null);
-  const [refundReason, setRefundReason] = useState('');
 
   // ---- Cancel confirm (pending_payment) ----
   const [showCancelPendingConfirm, setShowCancelPendingConfirm] = useState(false);
@@ -336,23 +320,6 @@ export const BookingsScreen: React.FC<BookingsScreenProps> = ({
       onShowToast(err?.response?.data?.message || 'Lỗi khi check-out.', 'error');
     } finally {
       setInspectionSubmitting(false);
-    }
-  };
-
-  // Hoàn tiền
-  const handleRefund = async () => {
-    if (!refundTarget) return;
-    try {
-      const refundAmount = refundTarget.paid_amount || refundTarget.total_amount || 0;
-      await adminService.cancelPaidBookingAndRefund(refundTarget.id, refundAmount, refundReason || 'Hoàn tiền theo yêu cầu', currentUser.role);
-      onShowToast(`Đã ghi nhận hoàn tiền ${formatMoney(refundAmount)} cho đơn ${refundTarget.booking_code}.`, 'success');
-      setShowRefundConfirm(false);
-      setRefundTarget(null);
-      setRefundReason('');
-      await fetchBookings();
-      fetchDateCounts();
-    } catch (err: any) {
-      onShowToast(err?.response?.data?.message || 'Lỗi khi hoàn tiền.', 'error');
     }
   };
 
@@ -843,7 +810,6 @@ export const BookingsScreen: React.FC<BookingsScreenProps> = ({
 
   const renderBookingRow = (b: any) => {
     const countdown = formatCountdown(b.hold_expires_at);
-    const refundOk = b.booking_status === 'cancelled' && isRefundEligible(b.booked_start_time);
     const rooms = b.rooms || [];
     const hasConcreteRoom = rooms.some((r: any) => r.room_id);
     const totalPaid = b.paid_amount || b.total_amount || rooms.reduce((acc: number, r: any) => acc + (r.base_price || 0), 0);
@@ -866,43 +832,21 @@ export const BookingsScreen: React.FC<BookingsScreenProps> = ({
         <td className="py-2.5 px-3.5">
           {rooms.length === 0 ? (
             <span className="text-[11px] text-[#78716C]">—</span>
-          ) : (
-            <div className="space-y-1">
-              {rooms.length > 1 && (
-                <div className="text-[10px] font-bold text-[#B4532A] bg-[#FAF3F0] px-1.5 py-0.5 rounded inline-block">
-                  Đơn {rooms.length} phòng
-                </div>
+          ) : rooms.map((r: any, i: number) => (
+            <div key={i} className="text-xs">
+              <span className="font-medium text-[#44403C]">{r.room_type_name}</span>
+              {r.room_number && <span className="ml-1 font-mono text-[#B4532A]">({r.room_number})</span>}
+              {!r.room_id && b.booking_status === 'pending_payment' && (
+                <span className="ml-1 text-[10px] text-[#78716C] italic">chưa gán</span>
               )}
-              {rooms.map((r: any, i: number) => {
-                const isAssigned = !!r.room_id && !!r.room_number;
-                return (
-                  <div key={i} className="text-xs flex items-center gap-1.5 flex-wrap">
-                    <span className="font-medium text-[#44403C]">{r.room_type_name || 'Phòng'}</span>
-                    {r.room_number ? (
-                      <span className="font-mono text-[#B4532A] font-bold">({r.room_number})</span>
-                    ) : (
-                      <span className="text-[10px] bg-[#FEF3C7] text-[#92400E] border border-[#FDE68A] px-1.5 py-0.2 rounded font-semibold">
-                        Chưa gán
-                      </span>
-                    )}
-                    {(r.has_extra_bed || b.has_extra_bed) && (
-                      <span className="text-[10px] bg-[#EDF5F1] text-[#2A694E] px-1.5 py-0.2 rounded font-semibold border border-[#CDE3D5]">
-                        + Nệm phụ
-                      </span>
-                    )}
-                  </div>
-                );
-              })}
             </div>
-          )}
+          ))}
         </td>
 
         {/* Ngày */}
         <td className="py-2.5 px-3.5 text-xs text-[#44403C]">
-          <div>{new Date(b.booked_start_time).toLocaleDateString('vi-VN')} → {new Date(b.booked_end_time).toLocaleDateString('vi-VN')}</div>
-          <div className="text-[11px] text-[#78716C]">
-            {new Date(b.booked_start_time).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })} → {new Date(b.booked_end_time).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })}
-          </div>
+          <div>{new Date(b.booked_start_time).toLocaleDateString('vi-VN')}</div>
+          <div className="text-[11px] text-[#78716C]">→ {new Date(b.booked_end_time).toLocaleDateString('vi-VN')}</div>
         </td>
 
         {/* Tiền */}
@@ -986,32 +930,6 @@ export const BookingsScreen: React.FC<BookingsScreenProps> = ({
               </Button>
             )}
 
-            {/* Tab: Đã hủy — Hoàn tiền */}
-            {b.booking_status === 'cancelled' && (b.paid_amount || 0) > 0 && (
-              <div className="relative group">
-                <Button
-                  variant={refundOk ? 'primary' : 'outline'}
-                  size="sm"
-                  disabled={!refundOk}
-                  onClick={() => {
-                    if (refundOk) {
-                      setRefundTarget(b);
-                      setRefundReason('');
-                      setShowRefundConfirm(true);
-                    }
-                  }}
-                  className={!refundOk ? 'opacity-50 cursor-not-allowed' : ''}
-                >
-                  Hoàn tiền
-                </Button>
-                {!refundOk && (
-                  <div className="absolute bottom-full right-0 mb-1.5 w-56 bg-[#1C1917] text-white text-[10px] rounded-[4px] px-2.5 py-1.5 z-50 shadow-lg hidden group-hover:block">
-                    Chỉ áp dụng hoàn tiền cho đơn hủy trước ngày nhận phòng trên 10 ngày (còn {daysUntilCheckin(b.booked_start_time)} ngày)
-                    <div className="absolute bottom-[-4px] right-3 w-2 h-2 bg-[#1C1917] rotate-45"></div>
-                  </div>
-                )}
-              </div>
-            )}
           </div>
         </td>
       </TableRow>
@@ -1373,6 +1291,7 @@ export const BookingsScreen: React.FC<BookingsScreenProps> = ({
   // ============================================================
   return (
     <div className="space-y-5">
+      <CustomerRequestsPanel currentUser={currentUser} selectedBranchId={selectedBranchId} />
       {/* ===== HEADER & TOP ACTIONS ===== */}
       <div className="flex items-center justify-between gap-3">
         <div>
@@ -1574,27 +1493,7 @@ export const BookingsScreen: React.FC<BookingsScreenProps> = ({
               <tr><td colSpan={7} className="py-10 text-center text-xs text-[#78716C]">Đang tải...</td></tr>
             ) : bookings.length === 0 ? (
               <tr><td colSpan={7} className="py-10 text-center text-xs text-[#78716C]">Không có đơn nào trong mục này.</td></tr>
-            ) : (
-              bookings.map((b: any, idx: number) => {
-                const prev = idx > 0 ? bookings[idx - 1] : null;
-                const bDateStr = new Date(b.booked_start_time).toLocaleDateString('vi-VN', { weekday: 'long', day: '2-digit', month: '2-digit' });
-                const prevDateStr = prev ? new Date(prev.booked_start_time).toLocaleDateString('vi-VN', { weekday: 'long', day: '2-digit', month: '2-digit' }) : null;
-                const showDateHeader = dateView === 'upcoming' && bDateStr !== prevDateStr;
-
-                return (
-                  <React.Fragment key={b.id}>
-                    {showDateHeader && (
-                      <tr className="bg-[#F5F2EB] border-y border-[#E5E0D8]">
-                        <td colSpan={7} className="py-1.5 px-3.5 text-[11px] font-bold text-[#78716C] uppercase tracking-wider">
-                          📅 {bDateStr}
-                        </td>
-                      </tr>
-                    )}
-                    {renderBookingRow(b)}
-                  </React.Fragment>
-                );
-              })
-            )}
+            ) : bookings.map(renderBookingRow)}
           </tbody>
         </TableContainer>
 
@@ -1652,9 +1551,11 @@ export const BookingsScreen: React.FC<BookingsScreenProps> = ({
                     <div>
                       <span className="font-medium">{r.room_type_name}</span>
                       {r.room_number && <span className="ml-2 font-mono text-[#B4532A]">({r.room_number})</span>}
+                      {r.pricing_snapshot?.features?.length>0&&<p className="text-[11px] text-[#78716C] mt-1">{r.pricing_snapshot.features.map((f:any)=>`${f.name}: +${formatMoney(f.extra_price_per_night)}/đêm`).join(' · ')}</p>}
+                      {r.pricing_snapshot?.extra_bed&&<p className="text-[11px] text-[#78716C]">Nệm phụ: +{formatMoney(r.pricing_snapshot.extra_bed_price_per_night)}/đêm · {r.pricing_snapshot.nights} đêm</p>}
                       {!r.room_id && <span className="ml-1 italic text-[#78716C]">chưa gán</span>}
                     </div>
-                    <span className="font-mono font-bold">{formatMoney(r.base_price)}</span>
+                    <span className="font-mono font-bold">{formatMoney(r.pricing_snapshot ? Number(r.unit_price||0)+Number(r.pricing_snapshot.extra_bed_total||0) : r.base_price)}</span>
                   </div>
                 ))}
               </div>
@@ -1663,8 +1564,11 @@ export const BookingsScreen: React.FC<BookingsScreenProps> = ({
             <div className="border-t border-[#E5E0D8] pt-3">
               <div className="flex justify-between font-bold">
                 <span>Tổng tiền</span>
-                <span className="font-mono text-[#B4532A]">{formatMoney(selectedBooking.paid_amount || selectedBooking.total_amount || 0)}</span>
+                <span className="font-mono text-[#B4532A]">{formatMoney(selectedBooking.total_price ?? selectedBooking.total_amount ?? 0)}</span>
               </div>
+              {Number(selectedBooking.discount_amount||0)>0&&<div className="flex justify-between mt-1 text-[#78716C]"><span>Giảm giá đã áp dụng</span><span>-{formatMoney(selectedBooking.discount_amount)}</span></div>}
+              <div className="flex justify-between mt-1"><span>Đã nhận thanh toán</span><span>{formatMoney(selectedBooking.paid_amount||0)}</span></div>
+              <div className="flex justify-between mt-1"><span>Còn cần thu</span><span>{formatMoney(selectedBooking.remaining_amount??Math.max(0,Number(selectedBooking.total_price||selectedBooking.total_amount||0)-Number(selectedBooking.paid_amount||0)))}</span></div>
               {selectedBooking.refund_amount && (
                 <div className="flex justify-between text-[#2A694E] mt-1">
                   <span>Đã hoàn tiền</span>
@@ -1900,20 +1804,6 @@ export const BookingsScreen: React.FC<BookingsScreenProps> = ({
         message={`Xác nhận check-out sớm cho đơn ${earlyCheckoutTarget?.booking_code}? Trạng thái đơn sẽ chuyển sang Hoàn tất và phòng sẽ chuyển sang Cần dọn dẹp.`}
         confirmLabel="Check-out sớm"
         variant="primary"
-      />
-
-      {/* ===== CONFIRM: HOÀN TIỀN ===== */}
-      <ConfirmDialog
-        isOpen={showRefundConfirm}
-        onClose={() => { setShowRefundConfirm(false); setRefundTarget(null); }}
-        onConfirm={handleRefund}
-        title="Xác nhận hoàn tiền"
-        message={`Xác nhận hoàn tiền ${refundTarget ? formatMoney(refundTarget.paid_amount || refundTarget.total_amount || 0) : ''} cho đơn ${refundTarget?.booking_code}?`}
-        confirmLabel="Xác nhận hoàn tiền"
-        variant="primary"
-        reasonRequired={false}
-        reasonValue={refundReason}
-        onReasonChange={setRefundReason}
       />
 
       {/* ===== CONFIRM: HỦY GIỮ CHỖ ===== */}

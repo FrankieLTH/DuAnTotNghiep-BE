@@ -1,3 +1,5 @@
+import { Payment as PaymentEntity, Transaction as TransactionEntity, Refund as RefundEntity } from '../../entities/booking.entity';
+import { customerNetPaid } from '../customer/customer-finance';
 // ============================================================================
 // ADMIN BOOKING SERVICE (Hoàn chỉnh chức năng Quản lý Booking)
 // ============================================================================
@@ -11,7 +13,7 @@ import {
   ConflictException,
 } from '@nestjs/common';
 import { DataSource } from 'typeorm';
-import * as dayjs from 'dayjs';
+import dayjs from 'dayjs';
 import {
   BookingStatus,
   BookingType,
@@ -241,7 +243,7 @@ export class AdminBookingService {
     const countQuery = `
       SELECT COUNT(DISTINCT b.id) AS total
       FROM BOOKINGS b
-      LEFT JOIN CUSTOMER c ON b.customer_id = c.id
+      LEFT JOIN CUSTOMER c ON b.customer_id = c.customer_id
       WHERE ${whereClause}
     `;
     const countResult = await this.dataSource.query(countQuery, params);
@@ -276,7 +278,7 @@ export class AdminBookingService {
         b.created_at
       FROM BOOKINGS b
       LEFT JOIN APARTMENT apt ON b.apartment_id = apt.id
-      LEFT JOIN CUSTOMER c ON b.customer_id = c.id
+      LEFT JOIN CUSTOMER c ON b.customer_id = c.customer_id
       WHERE ${whereClause}
       ORDER BY ${sortBy} ${sortOrder}
       LIMIT ? OFFSET ?
@@ -299,7 +301,7 @@ export class AdminBookingService {
 
       // Lấy Booking_rooms kèm số phòng hoặc "chưa gán"
       const rooms = await this.dataSource.query(
-        `SELECT br.id, br.room_types_id, rt.name AS room_type_name, br.room_id, r.room_number
+        `SELECT br.id, br.room_types_id, rt.name AS room_type_name, rt.base_price, br.unit_price, br.pricing_snapshot, br.room_id, r.room_number
          FROM Booking_rooms br
          LEFT JOIN room_types rt ON br.room_types_id = rt.id
          LEFT JOIN ROOMS r ON br.room_id = r.room_id
@@ -324,6 +326,7 @@ export class AdminBookingService {
         ...g,
         doc_number_masked: maskDocumentNumber(g.doc_number),
       }));
+      await this.savedPriceSummary(b);
     }
 
     return {
@@ -406,7 +409,7 @@ export class AdminBookingService {
         st_cn.full_name AS canceller_name
        FROM BOOKINGS b
        LEFT JOIN APARTMENT apt ON b.apartment_id = apt.id
-       LEFT JOIN CUSTOMER c ON b.customer_id = c.id
+       LEFT JOIN CUSTOMER c ON b.customer_id = c.customer_id
        LEFT JOIN STAFF st_cr ON b.created_by = st_cr.staff_id
        LEFT JOIN STAFF st_rv ON b.reviewed_by = st_rv.staff_id
        LEFT JOIN STAFF st_cn ON b.cancelled_by = st_cn.staff_id
@@ -422,7 +425,7 @@ export class AdminBookingService {
 
     // Danh sách phòng
     const rooms = await this.dataSource.query(
-      `SELECT br.id, br.room_types_id, rt.name AS room_type_name, rt.base_price, br.room_id, r.room_number, r.status AS room_status
+      `SELECT br.id, br.room_types_id, rt.name AS room_type_name, rt.base_price, br.unit_price, br.pricing_snapshot, br.room_id, r.room_number, r.status AS room_status
        FROM Booking_rooms br
        LEFT JOIN room_types rt ON br.room_types_id = rt.id
        LEFT JOIN ROOMS r ON br.room_id = r.room_id
@@ -477,6 +480,7 @@ export class AdminBookingService {
       [bookingId]
     );
 
+    await this.savedPriceSummary(booking);
     return booking;
   }
 
@@ -895,6 +899,13 @@ export class AdminBookingService {
     if (!booking) throw new NotFoundException(`Không tìm thấy đơn #${bookingId}`);
     this.enforceBranchAccess(staff, booking.apartment_id);
 
+    const [snapshotLine]=await this.dataSource.query('SELECT id FROM Booking_rooms WHERE bookings_id=? AND pricing_snapshot IS NOT NULL LIMIT 1',[bookingId]);
+    if(snapshotLine){
+      if(dto.check_in||dto.check_out||dto.room_type_id||dto.adults!==undefined||dto.children!==undefined)throw new BadRequestException('Đơn đã chốt cấu hình phòng và phụ thu. Cần tạo yêu cầu đổi phòng/ngày ở để kiểm tra lại giá; không sửa trực tiếp bằng biểu mẫu cũ.');
+      await this.dataSource.query('UPDATE BOOKINGS SET lock_email=COALESCE(?,lock_email),note=COALESCE(?,note),updated_at=NOW() WHERE id=?',[dto.lock_email??null,dto.note??null,bookingId]);
+      await this.auditLogService.log({actor:staff.full_name,action:'EDIT_BOOKING_CONTACT',entity_type:'BOOKINGS',entity_id:bookingId,new_value:dto});
+      return {success:true,message:'Đã cập nhật liên hệ/ghi chú; giữ nguyên giá đã chốt.'};
+    }
     if (booking.booking_status === BookingStatus.PENDING_PAYMENT) {
       const newCheckIn = dto.check_in || booking.booked_start_time;
       const newCheckOut = dto.check_out || booking.booked_end_time;
@@ -970,7 +981,8 @@ export class AdminBookingService {
   /**
    * 6. HỦY BOOKING
    * - pending_payment: manager & admin, nhả hold ngay
-   * - confirmed: admin only, bắt buộc cancel_reason, tạo TRANSACTION 'refund', nhả phòng, thu hồi PIN
+   * - confirmed: admin only, bắt buộc cancel_reason, nhả phòng, thu hồi PIN.
+   *   Hoàn 50% vào số dư chỉ được ghi qua yêu cầu hoàn tiền đã duyệt.
    */
   async cancelBooking(bookingId: number, cancelReason: string, staff: CurrentStaff) {
     const [booking] = await this.dataSource.query(`SELECT * FROM BOOKINGS WHERE id = ?`, [bookingId]);
@@ -1000,13 +1012,6 @@ export class AdminBookingService {
         actorId: staff.id,
         actionReason: cancelReason,
       });
-
-      // Ghi nhận TRANSACTION 'refund'
-      await this.dataSource.query(
-        `INSERT INTO TRANSACTION (booking_id, type, amount, payment_method, note, created_by, created_at)
-         VALUES (?, ?, ?, 'refund_transfer', ?, ?, NOW())`,
-        [bookingId, TransactionType.REFUND, booking.total_price, `Hoàn tiền hủy đơn: ${cancelReason}`, staff.id]
-      );
 
       // Giải phóng phòng
       await this.dataSource.query(`UPDATE Booking_rooms SET room_id = NULL WHERE bookings_id = ?`, [bookingId]);
@@ -1131,7 +1136,7 @@ export class AdminBookingService {
   async expireOverdueHolds() {
     const overdueBookings = await this.dataSource.query(
       `SELECT id, apartment_id, customer_id FROM BOOKINGS
-       WHERE booking_status = 'pending_payment'
+       WHERE booking_status IN ('draft', 'pending_payment')
          AND hold_expires_at IS NOT NULL
          AND hold_expires_at <= NOW()`
     );
@@ -1330,4 +1335,10 @@ export class AdminBookingService {
 
     return Math.max(0, totalRooms - occupied);
   }
+  private async savedPriceSummary(booking:any){
+    const [payments,transactions,refunds]=await Promise.all([this.dataSource.getRepository(PaymentEntity).findBy({booking_id:booking.id}),this.dataSource.getRepository(TransactionEntity).findBy({booking_id:booking.id}),this.dataSource.getRepository(RefundEntity).findBy({booking_id:booking.id})]);
+    booking.total_amount=Number(booking.total_price||0);booking.paid_amount=customerNetPaid(payments,transactions,refunds);booking.remaining_amount=Math.max(0,booking.total_amount-booking.paid_amount);
+    booking.rooms=(booking.booking_rooms||[]).map(r=>{let snapshot=r.pricing_snapshot;if(typeof snapshot==='string'){try{snapshot=JSON.parse(snapshot);}catch{snapshot=null;}}return {...r,pricing_snapshot:snapshot};});
+  }
+
 }

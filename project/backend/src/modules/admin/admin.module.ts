@@ -1,3 +1,4 @@
+import { CustomerManagementService } from '../customer/customer-management.service';
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { AdminService } from './admin.service';
@@ -49,6 +50,7 @@ import { PermissionsGuard } from '../../common/guards/permissions.guard';
     ]),
   ],
   providers: [
+    CustomerManagementService,
     AdminService,
     AuditLogService,
     AutoRoomAssignmentService,

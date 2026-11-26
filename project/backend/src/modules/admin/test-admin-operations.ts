@@ -1,4 +1,4 @@
-import * as assert from 'assert';
+import assert from 'assert';
 import { DataSource } from 'typeorm';
 import { BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { AdminBranchService } from './admin-branch.service';

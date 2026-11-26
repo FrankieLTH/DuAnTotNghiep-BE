@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
+import api, { adminAuthHeaders } from '../../../services/api';
 import {
   StatRow,
   Badge,
@@ -31,6 +32,15 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
   const [showApproveRefundConfirm, setShowApproveRefundConfirm] = useState<boolean>(false);
   const [showRejectRefundConfirm, setShowRejectRefundConfirm] = useState<boolean>(false);
   const [refundReason, setRefundReason] = useState<string>('');
+  const [pendingRefunds, setPendingRefunds] = useState<any[]>([]);
+  const requestHeaders = adminAuthHeaders();
+  useEffect(() => {
+    let active = true;
+    api.get('/admin/customer-requests', { headers: requestHeaders }).then(response => {
+      if (active) setPendingRefunds(response.data.filter((row: any) => row.type === 'refund' && ['pending', 'reviewing'].includes(row.status)).map((row: any) => ({ id: row.id, bookingCode: row.booking_code, guestName: row.customer_name, amount: row.refund_amount, reason: row.reason })));
+    }).catch(() => { if (active) setPendingRefunds([]); });
+    return () => { active = false; };
+  }, [currentUser.id, currentUser.role, currentUser.email, currentUser.branchId, selectedBranchId]);
 
   // Sample data tailored by branch
   // Branch 1: CN1 Triền Núi Nhỏ, Branch 2: CN2 Núi Lớn
@@ -41,7 +51,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
   const revenueValue = isBranch1 ? 28400000 : isBranch2 ? 19800000 : 48200000;
   const bookingCount = isBranch1 ? 16 : isBranch2 ? 12 : 28;
   const vacantRooms = isBranch1 ? '3 / 8' : isBranch2 ? '2 / 6' : '5 / 14';
-  const pendingRefundCount = isBranch1 ? 1 : isBranch2 ? 1 : 2;
+  const pendingRefundCount = pendingRefunds.length;
 
   const statItems = [
     {
@@ -115,43 +125,24 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
     },
   ].filter((item) => selectedBranchId === 0 || item.branchId === selectedBranchId);
 
-  // Short list 2: Yêu cầu hoàn tiền chờ xử lý
-  const pendingRefunds = [
-    {
-      id: 1,
-      bookingCode: 'BK-88914',
-      branchName: 'CN1 - Triền Núi Nhỏ',
-      branchId: 1,
-      guestName: 'Võ Quốc Huy',
-      amount: 1890000,
-      reason: 'Khách đổi lịch trình công tác khẩn cấp',
-      proposedBy: 'Lễ tân / Quản lý CN1',
-      proposedAt: '03/11/2026 14:20',
-    },
-    {
-      id: 2,
-      bookingCode: 'BK-88902',
-      branchName: 'CN2 - Bãi Trước',
-      branchId: 2,
-      guestName: 'Đặng Thảo Vy',
-      amount: 1250000,
-      reason: 'Bão thời tiết hủy chuyến tàu cao tốc',
-      proposedBy: 'Lễ tân / Quản lý CN2',
-      proposedAt: '03/11/2026 16:45',
-    },
-  ].filter((item) => selectedBranchId === 0 || item.branchId === selectedBranchId);
-
-  const handleApproveRefund = () => {
+  const handleApproveRefund = async () => {
     if (!selectedRefundItem) return;
-    onShowToast(`Đã duyệt hoàn tiền ${formatMoney(selectedRefundItem.amount)} cho đơn ${selectedRefundItem.bookingCode}`, 'success');
-    setSelectedRefundItem(null);
+    try {
+      await api.put(`/admin/customer-requests/${selectedRefundItem.id}`, { status: 'approved', staff_reply: refundReason.trim() }, { headers: requestHeaders });
+      setPendingRefunds(rows => rows.filter(row => row.id !== selectedRefundItem.id));
+      onShowToast(`Đã cộng ${formatMoney(selectedRefundItem.amount)} vào số dư khách của đơn ${selectedRefundItem.bookingCode}`, 'success');
+      setSelectedRefundItem(null); setShowApproveRefundConfirm(false); setRefundReason('');
+    } catch { onShowToast('Không thể duyệt hoàn tiền. Vui lòng kiểm tra yêu cầu trong Quản lý booking.', 'error'); }
   };
 
-  const handleRejectRefund = () => {
+  const handleRejectRefund = async () => {
     if (!selectedRefundItem) return;
-    onShowToast(`Đã từ chối yêu cầu hoàn tiền đơn ${selectedRefundItem.bookingCode}. Lý do: ${refundReason || 'Không hợp lệ'}`, 'warning');
-    setSelectedRefundItem(null);
-    setRefundReason('');
+    try {
+      await api.put(`/admin/customer-requests/${selectedRefundItem.id}`, { status: 'rejected', staff_reply: refundReason.trim() }, { headers: requestHeaders });
+      setPendingRefunds(rows => rows.filter(row => row.id !== selectedRefundItem.id));
+      onShowToast(`Đã từ chối yêu cầu hoàn tiền đơn ${selectedRefundItem.bookingCode}.`, 'warning');
+      setSelectedRefundItem(null); setShowRejectRefundConfirm(false); setRefundReason('');
+    } catch { onShowToast('Không thể từ chối yêu cầu. Vui lòng kiểm tra trong Quản lý booking.', 'error'); }
   };
 
   return (
@@ -346,7 +337,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
               </h3>
               <p className="text-xs text-[#78716C] mt-0.5">
                 {currentUser.role === 'admin'
-                  ? 'Admin có quyền duyệt và hoàn qua PayOS'
+                  ? 'Admin duyệt hoàn 50% vào số dư khách hàng'
                   : 'Quản lý chỉ theo dõi tiến độ duyệt'}
               </p>
             </div>
@@ -378,7 +369,6 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
                         {row.bookingCode}
                       </span>
                       <div className="text-xs text-[#44403C]">{row.guestName}</div>
-                      <div className="text-[11px] text-[#78716C]">{row.branchName}</div>
                     </td>
                     <td className="py-2 px-3">
                       <div className="font-mono text-sm font-bold text-[#DC2626] tabular-nums">
@@ -482,11 +472,11 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
         isOpen={showApproveRefundConfirm}
         onClose={() => setShowApproveRefundConfirm(false)}
         onConfirm={handleApproveRefund}
-        title="Duyệt hoàn tiền PayOS"
+        title="Duyệt hoàn 50% vào số dư"
         message={`Bạn có chắc chắn muốn duyệt hoàn tiền ${formatMoney(
           selectedRefundItem?.amount
-        )} cho đơn ${selectedRefundItem?.bookingCode}? Giao dịch hoàn tiền sẽ được ghi vào PayOS và Nhật ký thao tác.`}
-        confirmLabel="Duyệt & Hoàn tiền ngay"
+        )} cho đơn ${selectedRefundItem?.bookingCode}? Đơn sẽ được hủy và số tiền này được cộng vào số dư khách hàng.`}
+        confirmLabel="Duyệt và cộng số dư"
         variant="primary"
         reasonRequired={true}
         reasonValue={refundReason}

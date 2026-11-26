@@ -3,5 +3,5 @@
 -- Xóa cột special_features khỏi bảng ROOMS
 -- ============================================================================
 
-ALTER TABLE ROOMS 
+ALTER TABLE ROOMS
 DROP COLUMN special_features;

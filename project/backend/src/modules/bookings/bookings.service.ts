@@ -1,8 +1,8 @@
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import * as dayjs from 'dayjs';
-import { Booking, Voucher, Refund, LockPin } from '../../entities/booking.entity';
+import dayjs from 'dayjs';
+import { Booking, Voucher, LockPin } from '../../entities/booking.entity';
 import { Room } from '../../entities/room.entity';
 
 @Injectable()
@@ -12,8 +12,6 @@ export class BookingsService {
     private bookingRepository: Repository<Booking>,
     @InjectRepository(Voucher)
     private voucherRepository: Repository<Voucher>,
-    @InjectRepository(Refund)
-    private refundRepository: Repository<Refund>,
     @InjectRepository(LockPin)
     private lockPinRepository: Repository<LockPin>,
     @InjectRepository(Room)
@@ -144,13 +142,13 @@ export class BookingsService {
     return result;
   }
 
-  async getBookingById(id: number) {
+  async getBookingById(id: number, userId?: number) {
     const b = await this.bookingRepository.findOne({
       where: { id },
       relations: ['room', 'room.apartment', 'voucher'],
     });
 
-    if (!b) {
+    if (!b || !userId || b.user_id !== userId) {
       throw new NotFoundException('Không tìm thấy thông tin đơn đặt phòng');
     }
 
@@ -176,48 +174,15 @@ export class BookingsService {
     };
   }
 
-  async cancelBooking(id: number, reason?: string) {
+  async cancelBooking(id: number, reason?: string, userId?: number) {
     const booking = await this.bookingRepository.findOne({ where: { id } });
-    if (!booking) {
-      throw new NotFoundException('Không tìm thấy đơn đặt phòng');
+    if (!booking || !userId || booking.user_id !== userId) {
+      throw new NotFoundException('Booking not found');
     }
 
-    if (booking.booking_status === 'cancelled') {
-      throw new BadRequestException('Đơn đặt phòng này đã được hủy trước đó');
-    }
-
-    const now = dayjs();
-    const start = dayjs(booking.booked_start_time);
-    const diffDays = start.diff(now, 'day');
-
-    let refundPercentage = 0;
-    if (diffDays >= 2) {
-      refundPercentage = 50;
-    }
-
-    const refundAmount = (Number(booking.total_price) * refundPercentage) / 100;
-
-    const refund = this.refundRepository.create({
-      payment_id: 1, // Default or mock
-      booking_id: booking.id,
-      refund_amount: refundAmount,
-      refund_percentage: refundPercentage,
-      status: 'requested',
-      reason: reason || (diffDays >= 2 ? 'Hủy trước >= 2 ngày (Hoàn 50%)' : 'Hủy dưới < 2 ngày (Hoàn 0%)'),
-    });
-
-    await this.refundRepository.save(refund);
-
-    booking.booking_status = 'cancelled' as any;
-    await this.bookingRepository.save(booking);
-
-    return {
-      message: 'Hủy đơn đặt phòng thành công',
-      booking_id: booking.id,
-      refund_percentage: refundPercentage,
-      refund_amount: refundAmount,
-      refund_reason: refund.reason,
-    };
+    // Prevent the legacy endpoint from bypassing admin review and wallet refund handling.
+    void reason;
+    throw new BadRequestException('Submit cancellation/refund requests from the booking lookup page. An administrator must review the request; approval credits 50% of the paid amount to the customer wallet.');
   }
 
   async getVouchers() {

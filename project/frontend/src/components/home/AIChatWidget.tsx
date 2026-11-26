@@ -21,7 +21,8 @@ export const AIChatWidget: React.FC = () => {
     // Gọi API Backend NestJS AI Chatbot (/api/ai/chat)
     try {
       const token = localStorage.getItem('access_token');
-      const res = await fetch('http://localhost:3000/api/ai/chat', {
+      const apiBase = import.meta.env.VITE_API_URL || '/api';
+      const res = await fetch(`${apiBase}/ai/chat`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

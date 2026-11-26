@@ -1,28 +1,87 @@
-version: '3.8'
+name: duanmoi
 
 services:
-  postgres:
-    image: postgres:16-alpine
-    container_name: homestay_postgres
-    restart: always
+  mysql:
+    image: mysql:8.0
+    command: --lower-case-table-names=1 --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
+    restart: unless-stopped
     environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgrespassword
-      POSTGRES_DB: homestay_db
+      MYSQL_ROOT_PASSWORD: duanmoi_root_local
+      MYSQL_DATABASE: duanmoi
+      MYSQL_USER: duanmoi
+      MYSQL_PASSWORD: duanmoi_local
+      TZ: Asia/Ho_Chi_Minh
     ports:
-      - '5432:5432'
+      - '127.0.0.1:3307:3306'
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      - mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ['CMD-SHELL', 'mysqladmin ping -h localhost -uroot -p"$$MYSQL_ROOT_PASSWORD" --silent']
+      interval: 5s
+      timeout: 5s
+      retries: 30
 
   redis:
     image: redis:7-alpine
-    container_name: homestay_redis
-    restart: always
+    restart: unless-stopped
     ports:
-      - '6379:6379'
+      - '127.0.0.1:6380:6379'
     volumes:
       - redis_data:/data
 
+  backend:
+    build:
+      context: ./project
+      dockerfile: backend/Dockerfile
+    restart: unless-stopped
+    env_file: ./project/backend/.env
+    environment:
+      DB_HOST: mysql
+      DB_PORT: 3306
+      DB_USERNAME: duanmoi
+      DB_PASSWORD: duanmoi_local
+      DB_DATABASE: duanmoi
+      REDIS_URL: redis://redis:6379
+      PORT: 3000
+      TZ: Asia/Ho_Chi_Minh
+      FRONTEND_URL: ${DUANMOI_FRONTEND_URL:-http://localhost:5174}
+      PAYOS_CLIENT_ID: ${DUANMOI_PAYOS_CLIENT_ID:-}
+      PAYOS_API_KEY: ${DUANMOI_PAYOS_API_KEY:-}
+      PAYOS_CHECKSUM_KEY: ${DUANMOI_PAYOS_CHECKSUM_KEY:-}
+      SMTP_HOST: ${DUANMOI_SMTP_HOST:-smtp.gmail.com}
+      SMTP_PORT: ${DUANMOI_SMTP_PORT:-587}
+      SMTP_SECURE: ${DUANMOI_SMTP_SECURE:-false}
+      SMTP_USER: ${DUANMOI_SMTP_USER:?Thieu DUANMOI_SMTP_USER trong .env}
+      SMTP_PASS: ${DUANMOI_SMTP_PASS:?Thieu DUANMOI_SMTP_PASS trong .env}
+      SMTP_FROM: ${DUANMOI_SMTP_FROM:-Đồi Bông Gòn <no-reply@duanmoi.local>}
+    ports:
+      - '127.0.0.1:3001:3000'
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    healthcheck:
+      test: ['CMD', 'node', '-e', 'fetch("http://127.0.0.1:3000/api/apartments").then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))']
+      interval: 10s
+      timeout: 5s
+      retries: 15
+      start_period: 45s
+
+  frontend:
+    build:
+      context: ./project
+      dockerfile: frontend/Dockerfile
+    restart: unless-stopped
+    environment:
+      VITE_API_URL: /api
+      VITE_PROXY_TARGET: http://backend:3000
+    ports:
+      - '127.0.0.1:5174:5173'
+    depends_on:
+      backend:
+        condition: service_healthy
+
 volumes:
-  postgres_data:
+  mysql_data:
   redis_data:

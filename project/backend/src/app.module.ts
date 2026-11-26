@@ -28,6 +28,7 @@ import { PaymentsModule } from './modules/payments/payments.module';
 import { LocksModule } from './modules/locks/locks.module';
 import { AIModule } from './modules/ai/ai.module';
 import { AdminModule } from './modules/admin/admin.module';
+import { CustomerModule } from './modules/customer/customer.module';
 import { CronModule } from './modules/cron/cron.module';
 
 @Module({
@@ -61,6 +62,7 @@ import { CronModule } from './modules/cron/cron.module';
     EventEmitterModule.forRoot(),
 
     AuthModule,
+    CustomerModule,
     RoomsModule,
     BookingsModule,
     PaymentsModule,

@@ -10,135 +10,38 @@ export const RoomSelectionSection: React.FC<RoomSelectionSectionProps> = ({ onSe
   const [apartments, setApartments] = useState<ApartmentItem[]>([]);
   const [selectedApartmentId, setSelectedApartmentId] = useState<number | 'all'>('all');
   const [loading, setLoading] = useState<boolean>(true);
+  const [loadError, setLoadError] = useState(false);
 
   // 6 Hạng phòng mẫu chuẩn bộ nhận diện như trang danh sách phòng
-  const featuredRooms = [
-    {
-      id: 1,
-      name: 'Sunset Penthouse & Jacuzzi 270°',
-      branch: 'CN1: Hải Đăng',
-      rating: '5.0',
-      reviewCount: 48,
-      badge: 'SIGNATURE HOMESTAY',
-      subBadge: 'View ngắm hoàng hôn',
-      footerTag: 'Ưu đãi trực tiếp 10% khi đặt hôm nay',
-      badgePhotos: '12 ảnh',
-      description:
-        'Tầng cao ngắm trọn hoàng hôn biển Vũng Tàu 270 độ, trang bị bồn sục Jacuzzi ngoài trời cao cấp và ban công mộc mạc ngát gió biển.',
-      bed: '1 Queen Bed',
-      guests: '2 - 3 Khách',
-      special: 'Jacuzzi 270°',
-      area: '55 m²',
-      price: 1890000,
-      oldPrice: null,
-      image: 'https://images.unsplash.com/photo-1590490360182-c33d57733427?auto=format&fit=crop&w=800&q=80',
-    },
-    {
-      id: 2,
-      name: 'Sea View Balcony Room',
-      branch: 'CN1: Hải Đăng',
-      rating: '4.9',
-      reviewCount: 52,
-      badge: 'ĐẶT NHIỀU CUỐI TUẦN',
-      subBadge: 'View ngắm hoàng hôn',
-      footerTag: 'View ngắm trọn hoàng hôn biển',
-      badgePhotos: 'Hút khách',
-      description:
-        'Ban công rộng nhìn thẳng ra biển Vũng Tàu, ngồi nhâm nhi trà buổi bình minh là một trải nghiệm khó quên cho bất kỳ ai tìm kiếm sự an yên.',
-      bed: '1 King/Queen',
-      guests: '2 Khách',
-      special: 'Ban công biển',
-      area: '42 m²',
-      price: 850000,
-      oldPrice: 1050000,
-      image: 'https://images.unsplash.com/photo-1566665797739-1674de7a421a?auto=format&fit=crop&w=800&q=80',
-    },
-    {
-      id: 3,
-      name: 'The Cotton Cloud Suite',
-      branch: 'CN1: Hải Đăng',
-      rating: '4.9',
-      reviewCount: 41,
-      badge: 'FAVORITE COUPLES',
-      subBadge: 'Ngắm sao trời',
-      footerTag: 'Bồn tắm lộ thiên ngoài trời & Tivi 4K',
-      badgePhotos: 'Lãng mạn',
-      description:
-        'Không gian ngập tràn ánh sáng với giường bông êm ái, bồn tắm view ban công ngắm sao trời, dành riêng cho những cặp đôi tận hưởng kỳ nghỉ.',
-      bed: '1 Giường King',
-      guests: '2 Khách',
-      special: 'Rạp mini 4K',
-      area: '45 m²',
-      price: 920000,
-      oldPrice: null,
-      image: 'https://images.unsplash.com/photo-1582719478250-c89cae4dc85b?auto=format&fit=crop&w=800&q=80',
-    },
-    {
-      id: 4,
-      name: 'The Family Attic & Terrace',
-      branch: 'CN1: Hải Đăng',
-      rating: '4.93',
-      reviewCount: 32,
-      badge: 'BEST SELLER GIA ĐÌNH',
-      subBadge: 'Căn hộ gác mái',
-      footerTag: 'Bếp nấu riêng biệt • Sân hiên BBQ',
-      badgePhotos: '2 phòng ngủ',
-      description:
-        'Căn hộ 2 tầng lý tưởng cho gia đình, mang hơi thở mộc mạc đầy đủ nhà bếp riêng và ban công nướng BBQ rộng rãi ngắm view phố biển.',
-      bed: '2 Phòng ngủ',
-      guests: '4 - 6 Khách',
-      special: 'Bếp BBQ riêng',
-      area: '85 m²',
-      price: 1250000,
-      oldPrice: null,
-      image: 'https://images.unsplash.com/photo-1600585154340-be6161a56a0c?auto=format&fit=crop&w=800&q=80',
-    },
-    {
-      id: 5,
-      name: 'The Garden Suite (Trệt & Sân Hiên Đá)',
-      branch: 'CN1: Thiền Môn',
-      rating: '4.96',
-      reviewCount: 29,
-      badge: 'GẦN GŨI THIÊN NHIÊN',
-      subBadge: 'Sân hiên riêng đá',
-      footerTag: 'Sân vườn riêng biệt mộc mạc',
-      badgePhotos: 'Yên tĩnh',
-      description:
-        'Sân hiên vườn rợp bóng cây cỏ nhiệt đới, băng ghế bên ngoài hiên mộc mạc đón những làn gió tự nhiên lành lạnh của triền núi Vũng Tàu.',
-      bed: '1 Giường King',
-      guests: '2 Khách',
-      special: 'Bồn tắm mộc',
-      area: '50 m²',
-      price: 950000,
-      oldPrice: null,
-      image: 'https://images.unsplash.com/photo-1618773928121-c32242e63f39?auto=format&fit=crop&w=800&q=80',
-    },
-    {
-      id: 6,
-      name: 'Hillside Studio & Workspace',
-      branch: 'CN2: Retreat',
-      rating: '4.91',
-      reviewCount: 37,
-      badge: 'LÀM VIỆC & NGHỈ DƯỠNG',
-      subBadge: 'Wifi 100Mbps',
-      footerTag: 'Bàn làm việc sồi tự nhiên • Cửa sổ Panorama',
-      badgePhotos: 'Yên tĩnh',
-      description:
-        'Bàn làm việc gỗ sồi rộng rãi nhìn ra hướng núi, điện thoả mãn nhu cầu làm việc tự do hay trốn phố tìm sự an tĩnh và năng lượng sáng tạo mới.',
-      bed: '1 Giường Queen',
-      guests: '2 Khách',
-      special: 'Bàn sồi/Núi',
-      area: '38 m²',
-      price: 880000,
-      oldPrice: null,
-      image: 'https://images.unsplash.com/photo-1598928506311-c55ded91a20c?auto=format&fit=crop&w=800&q=80',
-    },
-  ];
+  // Mỗi thẻ đại diện cho một loại phòng đang có trong database.
+  const visibleRooms = rooms.filter(room =>
+    room.status !== 'inactive' &&
+    (selectedApartmentId === 'all' || room.apartment_id === selectedApartmentId)
+  );
+  const featuredRooms = [...new Map(visibleRooms.sort((a,b)=>b.base_price-a.base_price).map(room => [`${room.apartment_id}:${room.room_type_parent_id || room.room_type_id}`, room])).values()]
+    .sort((a, b) => a.apartment_id - b.apartment_id || a.room_type_id - b.room_type_id)
+    .map(room => ({
+      id: room.id,
+      name: room.room_type_parent_name || room.room_type_name,
+      branch: room.apartment_name,
+      badge: 'LOẠI PHÒNG',
+      subBadge: room.bed_type,
+      footerTag: 'Chọn ngày và biến thể ở trang chi tiết',
+      badgePhotos: 'Ảnh minh họa',
+      description: room.description,
+      bed: room.bed_type,
+      guests: 'Tối đa ' + room.max_occupancy + ' khách',
+      special: 'Xem biến thể và ngày trống',
+      area: room.area,
+      price: Number(room.base_type_price ?? room.base_price),
+      image: room.images[0] || 'https://images.unsplash.com/photo-1590490360182-c33d57733427?auto=format&fit=crop&w=800&q=80',
+    }));
 
   useEffect(() => {
     async function loadData() {
       try {
         setLoading(true);
+        setLoadError(false);
         const [roomsData, aptData] = await Promise.all([
           getRooms(),
           getApartments(),
@@ -147,6 +50,7 @@ export const RoomSelectionSection: React.FC<RoomSelectionSectionProps> = ({ onSe
         setApartments(aptData);
       } catch (e) {
         console.error('Error loading rooms:', e);
+        setLoadError(true);
       } finally {
         setLoading(false);
       }
@@ -163,7 +67,7 @@ export const RoomSelectionSection: React.FC<RoomSelectionSectionProps> = ({ onSe
             BOUTIQUE SUITES &amp; HILLSIDE ROOMS
           </span>
           <h2 className="font-serif font-bold text-2xl sm:text-3xl md:text-4xl text-[#1E1B18] tracking-tight">
-            Bộ sưu tập phòng nghỉ sẵn sàng đón khách
+            Các loại phòng đang nhận đặt
           </h2>
           <p className="text-xs sm:text-sm text-[#73665C] max-w-xl mt-1.5 leading-relaxed font-normal">
             Không gian nghỉ dưỡng mộc mạc, riêng tư với hệ thống tự check-in bằng khóa thông minh TTLock 24/7.
@@ -182,30 +86,21 @@ export const RoomSelectionSection: React.FC<RoomSelectionSectionProps> = ({ onSe
           >
             Tất cả cơ sở
           </button>
-          <button
-            onClick={() => setSelectedApartmentId(1)}
+          {apartments.map(apartment => <button
+            key={apartment.id}
+            onClick={() => setSelectedApartmentId(apartment.id)}
             className={`px-4 py-2 rounded-full text-xs font-semibold transition-all cursor-pointer ${
-              selectedApartmentId === 1
+              selectedApartmentId === apartment.id
                 ? 'bg-[#1E1B18] text-white shadow-xs'
                 : 'bg-white text-[#73665C] border border-[#E8E2D8] hover:text-[#1E1B18]'
             }`}
-          >
-            CN1: Hải Đăng &amp; Thiền Môn
-          </button>
-          <button
-            onClick={() => setSelectedApartmentId(2)}
-            className={`px-4 py-2 rounded-full text-xs font-semibold transition-all cursor-pointer ${
-              selectedApartmentId === 2
-                ? 'bg-[#1E1B18] text-white shadow-xs'
-                : 'bg-white text-[#73665C] border border-[#E8E2D8] hover:text-[#1E1B18]'
-            }`}
-          >
-            CN2: Lưng Chừng Biển
-          </button>
+          >{apartment.name}</button>)}
         </div>
       </div>
 
-      {/* Grid 6 Hạng Phòng Y HỆT BOX PHÒNG TRANG DANH SÁCH PHÒNG - KHÔNG DÙNG ICON EMOJI */}
+      {loading && <p className="text-center text-sm text-[#73665C]">Đang tải các loại phòng…</p>}
+      {loadError && <p className="text-center text-sm text-[#A83232]">Chưa tải được giá phòng từ hệ thống. Vui lòng tải lại trang.</p>}
+      {!loading && !loadError && !featuredRooms.length && <p className="text-center text-sm text-[#73665C]">Chưa có loại phòng ở cơ sở này.</p>}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 sm:gap-7">
         {featuredRooms.map((room) => (
           <div
@@ -243,10 +138,7 @@ export const RoomSelectionSection: React.FC<RoomSelectionSectionProps> = ({ onSe
               {/* Nội dung thông tin phòng */}
               <div className="p-5">
                 <div className="flex items-center justify-between text-xs mb-2">
-                  <div className="flex items-center gap-1 font-semibold text-[#1E1B18]">
-                    <span className="text-[#C4572E] font-bold">Điểm {room.rating}</span>
-                    <span className="text-[#8C7A70] font-normal">({room.reviewCount} đánh giá)</span>
-                  </div>
+                  <span className="text-[#C4572E] font-semibold">Loại phòng</span>
                   <span className="text-[10px] uppercase font-semibold text-white bg-[#1E1B18] px-2 py-0.5 rounded font-mono">
                     {room.branch}
                   </span>
@@ -285,11 +177,7 @@ export const RoomSelectionSection: React.FC<RoomSelectionSectionProps> = ({ onSe
             <div className="p-5 pt-0">
               <div className="pt-3 border-t border-[#E8E2D8] flex items-center justify-between">
                 <div>
-                  {room.oldPrice && (
-                    <span className="block text-[11px] text-[#A09388] line-through">
-                      {room.oldPrice.toLocaleString('vi-VN')}đ
-                    </span>
-                  )}
+                  <span className="block text-[10px] text-[#73665C]">Giá niêm yết</span>
                   <div className="flex items-baseline gap-1">
                     <span className="font-bold text-lg text-[#C4572E]">
                       {room.price.toLocaleString('vi-VN')}đ
