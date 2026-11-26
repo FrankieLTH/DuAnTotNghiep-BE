@@ -1,0 +1,10 @@
+DESCRIBE users;
+DESCRIBE roles;
+DESCRIBE bookings;
+DESCRIBE locks;
+DESCRIBE lock_pin;
+DESCRIBE audit_logs;
+DESCRIBE payments;
+DESCRIBE refunds;
+DESCRIBE vouchers;
+DESCRIBE payment_methods;

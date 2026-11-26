@@ -1,12 +1,12 @@
 import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateColumn, ManyToOne, JoinColumn } from 'typeorm';
 import { Apartment } from './room.entity';
 
-@Entity('ROLES')
+@Entity('roles')
 export class Role {
-  @PrimaryGeneratedColumn({ name: 'role_id' })
+  @PrimaryGeneratedColumn()
   id: number;
 
-  @Column({ name: 'role_name', unique: true })
+  @Column({ unique: true })
   role_name: string;
 }
 

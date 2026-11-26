@@ -452,7 +452,7 @@ export class AdminBookingService {
     const lockPins = await this.dataSource.query(
       `SELECT lp.*, l.cloud_lock_id, l.lock_name
        FROM lock_pin lp
-       LEFT JOIN lock l ON lp.lock_id = l.id
+       LEFT JOIN locks l ON lp.lock_id = l.id
        WHERE lp.booking_id = ?`,
       [bookingId]
     );
@@ -847,7 +847,7 @@ export class AdminBookingService {
           [bookingId]
         );
         if (assignedRoom) {
-          const [lock] = await this.dataSource.query(`SELECT id FROM lock WHERE room_id = ? AND deleted_at IS NULL LIMIT 1`, [assignedRoom.room_id]);
+          const [lock] = await this.dataSource.query(`SELECT id FROM locks WHERE room_id = ? AND deleted_at IS NULL LIMIT 1`, [assignedRoom.room_id]);
           if (lock) {
             const randomPin = Math.floor(100000 + Math.random() * 900000).toString();
             await this.dataSource.query(
@@ -1306,7 +1306,7 @@ export class AdminBookingService {
     const [totalRes] = await this.dataSource.query(
       `SELECT COUNT(DISTINCT r.room_id) AS total
        FROM ROOMS r
-       JOIN lock l ON l.room_id = r.room_id
+       JOIN locks l ON l.room_id = r.room_id
        WHERE r.room_type_id = ? AND r.status = 'available' AND r.is_hidden = 0 AND l.deleted_at IS NULL`,
       [roomTypeId]
     );

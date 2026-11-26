@@ -25,7 +25,7 @@ import {
   LockType,
 } from '@shared/enums';
 
-@Entity('lock')
+@Entity('locks')
 export class Lock {
   @PrimaryGeneratedColumn()
   id: number;
@@ -104,7 +104,7 @@ export class Voucher {
   is_active: boolean;
 }
 
-@Entity('BOOKINGS')
+@Entity('bookings')
 @Index('idx_bookings_apt_status_start', ['apartment_id', 'booking_status', 'booked_start_time'])
 @Index('idx_bookings_customer_hold', ['customer_id', 'hold_expires_at'])
 export class Booking {
@@ -462,7 +462,7 @@ export class Transaction {
   created_at: Date;
 }
 
-@Entity('Audit_logs')
+@Entity('audit_logs')
 @Index('idx_audit_logs_entity', ['entity_type', 'entity_id'])
 export class AuditLog {
   @PrimaryGeneratedColumn()

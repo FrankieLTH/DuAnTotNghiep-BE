@@ -474,7 +474,7 @@ export class AdminRoomService {
       LEFT JOIN APARTMENT a ON a.id = r.apartment_id
       LEFT JOIN room_types rt ON rt.id = r.room_type_id
       LEFT JOIN room_groups rg ON rg.id = r.room_group_id
-      LEFT JOIN lock l ON l.room_id = r.room_id AND l.deleted_at IS NULL
+      LEFT JOIN locks l ON l.room_id = r.room_id AND l.deleted_at IS NULL
       WHERE r.deleted_at IS NULL
     `;
     const params: any[] = [];
@@ -560,7 +560,7 @@ export class AdminRoomService {
        FROM ROOMS r
        LEFT JOIN APARTMENT a ON a.id = r.apartment_id
        LEFT JOIN room_types rt ON rt.id = r.room_type_id
-       LEFT JOIN lock l ON l.room_id = r.room_id AND l.deleted_at IS NULL
+       LEFT JOIN locks l ON l.room_id = r.room_id AND l.deleted_at IS NULL
        WHERE r.room_id = ?`,
       [roomId],
     );
@@ -674,7 +674,7 @@ export class AdminRoomService {
     // Gán khóa nếu có chọn
     if (dto.lock_id) {
       const [lockItem] = await this.dataSource.query(
-        `SELECT id, room_id, deleted_at FROM lock WHERE id = ?`,
+        `SELECT id, room_id, deleted_at FROM locks WHERE id = ?`,
         [dto.lock_id],
       );
       if (!lockItem || lockItem.deleted_at !== null) {
@@ -1177,7 +1177,7 @@ export class AdminRoomService {
   async getAvailableLocks() {
     return await this.dataSource.query(`
       SELECT id, cloud_lock_id, lock_name, lock_type, lock_status, battery_level, last_sync_at
-      FROM lock
+      FROM locks
       WHERE room_id IS NULL AND deleted_at IS NULL
       ORDER BY id ASC
     `);
@@ -1196,7 +1196,7 @@ export class AdminRoomService {
 
     // Lấy khóa hiện tại đang gắn với phòng (nếu có)
     const [currentLock] = await this.dataSource.query(
-      `SELECT id, lock_name FROM lock WHERE room_id = ? AND deleted_at IS NULL`,
+      `SELECT id, lock_name FROM locks WHERE room_id = ? AND deleted_at IS NULL`,
       [roomId],
     );
 
@@ -1218,7 +1218,7 @@ export class AdminRoomService {
 
     // GÁN KHÓA MỚI
     const [targetLock] = await this.dataSource.query(
-      `SELECT id, room_id, deleted_at, lock_name FROM lock WHERE id = ?`,
+      `SELECT id, room_id, deleted_at, lock_name FROM locks WHERE id = ?`,
       [lockId],
     );
     if (!targetLock || targetLock.deleted_at !== null) {

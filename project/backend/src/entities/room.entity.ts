@@ -12,7 +12,7 @@ import {
   Unique,
 } from 'typeorm';
 
-@Entity('APARTMENT')
+@Entity('apartments')
 export class Apartment {
   @PrimaryGeneratedColumn()
   id: number;
@@ -26,8 +26,8 @@ export class Apartment {
   @Column({ nullable: true })
   hotline: string;
 
-  @Column({ type: 'enum', enum: ['active', 'hidden'], default: 'active' })
-  status: 'active' | 'hidden';
+  @Column({ type: 'enum', enum: ['active', 'hidden', 'inactive', 'under_construction'], default: 'active' })
+  status: 'active' | 'hidden' | 'inactive' | 'under_construction';
 
   @CreateDateColumn()
   created_at: Date;
@@ -73,92 +73,6 @@ export class RoomType {
   created_at: Date;
 }
 
-@Entity('ROOMS')
-@Unique(['apartment_id', 'room_number'])
-export class Room {
-  @PrimaryGeneratedColumn({ name: 'room_id' })
-  id: number;
-
-  @Column({ name: 'room_id', insert: false, update: false })
-  room_id: number;
-
-  @Column()
-  apartment_id: number;
-
-  @ManyToOne(() => Apartment)
-  @JoinColumn({ name: 'apartment_id' })
-  apartment: Apartment;
-
-  @Column()
-  room_type_id: number;
-
-  @ManyToOne(() => RoomType)
-  @JoinColumn({ name: 'room_type_id' })
-  room_type: RoomType;
-
-  @Column()
-  room_number: string;
-
-  @Column({ type: 'int', default: 1 })
-  floor: number;
-
-  @Column({ type: 'int', nullable: true })
-  room_group_id?: number | null;
-
-  @ManyToOne(() => RoomGroup, { nullable: true, onDelete: 'SET NULL' })
-  @JoinColumn({ name: 'room_group_id' })
-  room_group?: RoomGroup | null;
-
-  @Column({ type: 'text', nullable: true })
-  note?: string | null;
-
-  @Column({ type: 'enum', enum: ['clean', 'dirty'], default: 'clean' })
-  housekeeping: 'clean' | 'dirty';
-
-  @Column({ type: 'datetime', nullable: true })
-  deleted_at?: Date | null;
-
-  @Column({ type: 'enum', enum: ['available', 'occupied', 'cleaning', 'maintenance'], default: 'available' })
-  status: 'available' | 'occupied' | 'cleaning' | 'maintenance';
-
-  @Column({ type: 'varchar', length: 500, nullable: true, comment: 'Mô tả đặc điểm đặc biệt của phòng (nhập tay, không ảnh hưởng giá)' })
-  special_features?: string | null;
-
-  @Column({ type: 'date', nullable: true })
-  last_maintenance_date: string;
-
-  @Column({ default: false })
-  is_hidden: boolean;
-
-  @CreateDateColumn()
-  created_at: Date;
-
-  @UpdateDateColumn()
-  updated_at: Date;
-
-  @OneToMany(() => RoomImage, (image) => image.room)
-  images: RoomImage[];
-
-  @ManyToMany(() => Amenity)
-  @JoinTable({
-    name: 'room_amenities',
-    joinColumn: { name: 'room_id', referencedColumnName: 'id' },
-    inverseJoinColumn: { name: 'amenity_id', referencedColumnName: 'id' },
-  })
-  amenities: Amenity[];
-
-  @ManyToMany(() => RoomFeature)
-  @JoinTable({
-    name: 'room_feature_map',
-    joinColumn: { name: 'room_id', referencedColumnName: 'id' },
-    inverseJoinColumn: { name: 'feature_id', referencedColumnName: 'id' },
-  })
-  features: RoomFeature[];
-
-  @OneToMany(() => RoomBlock, (block) => block.room)
-  room_blocks: RoomBlock[];
-}
-
 @Entity('room_groups')
 export class RoomGroup {
   @PrimaryGeneratedColumn()
@@ -200,9 +114,9 @@ export class RoomBlock {
   @Column()
   room_id: number;
 
-  @ManyToOne(() => Room, (room) => room.room_blocks, { onDelete: 'CASCADE' })
+  @ManyToOne('Room', 'room_blocks', { onDelete: 'CASCADE' })
   @JoinColumn({ name: 'room_id' })
-  room: Room;
+  room: any;
 
   @Column({ type: 'datetime' })
   from_at: Date;
@@ -220,6 +134,92 @@ export class RoomBlock {
   created_at: Date;
 }
 
+@Entity('rooms')
+@Unique(['apartment_id', 'room_number'])
+export class Room {
+  @PrimaryGeneratedColumn()
+  id: number;
+
+  // Alias cho backward-compat với các service dùng room.room_id
+  get room_id(): number { return this.id; }
+
+  @Column()
+  apartment_id: number;
+
+  @ManyToOne(() => Apartment)
+  @JoinColumn({ name: 'apartment_id' })
+  apartment: Apartment;
+
+  @Column()
+  room_type_id: number;
+
+  @ManyToOne(() => RoomType)
+  @JoinColumn({ name: 'room_type_id' })
+  room_type: RoomType;
+
+  @Column()
+  room_number: string;
+
+  @Column({ type: 'int', default: 1 })
+  floor: number;
+
+  @Column({ type: 'int', nullable: true })
+  room_group_id?: number | null;
+
+  @ManyToOne(() => RoomGroup, { nullable: true, onDelete: 'SET NULL' })
+  @JoinColumn({ name: 'room_group_id' })
+  room_group?: RoomGroup | null;
+
+  @Column({ type: 'text', nullable: true })
+  note?: string | null;
+
+  @Column({ type: 'enum', enum: ['clean', 'dirty'], default: 'clean' })
+  housekeeping: 'clean' | 'dirty';
+
+  @Column({ type: 'datetime', nullable: true })
+  deleted_at?: Date | null;
+
+  @Column({ type: 'enum', enum: ['available', 'occupied', 'cleaning', 'maintenance', 'inactive'], default: 'available' })
+  status: 'available' | 'occupied' | 'cleaning' | 'maintenance' | 'inactive';
+
+  @Column({ type: 'varchar', length: 500, nullable: true, comment: 'Mô tả đặc điểm đặc biệt của phòng (nhập tay, không ảnh hưởng giá)' })
+  special_features?: string | null;
+
+  @Column({ type: 'date', nullable: true })
+  last_maintenance_date: string;
+
+  @Column({ default: false })
+  is_hidden: boolean;
+
+  @CreateDateColumn()
+  created_at: Date;
+
+  @UpdateDateColumn()
+  updated_at: Date;
+
+  @OneToMany(() => RoomImage, (image) => image.room)
+  images: RoomImage[];
+
+  @ManyToMany(() => Amenity)
+  @JoinTable({
+    name: 'room_amenities',
+    joinColumn: { name: 'room_id', referencedColumnName: 'id' },
+    inverseJoinColumn: { name: 'amenity_id', referencedColumnName: 'id' },
+  })
+  amenities: Amenity[];
+
+  @ManyToMany(() => RoomFeature)
+  @JoinTable({
+    name: 'room_feature_map',
+    joinColumn: { name: 'room_id', referencedColumnName: 'id' },
+    inverseJoinColumn: { name: 'feature_id', referencedColumnName: 'id' },
+  })
+  features: RoomFeature[];
+
+  @OneToMany(() => RoomBlock, (block) => block.room)
+  room_blocks: RoomBlock[];
+}
+
 @Entity('amenities')
 export class Amenity {
   @PrimaryGeneratedColumn()
@@ -232,7 +232,7 @@ export class Amenity {
   category: string;
 }
 
-@Entity('ROOM_IMAGES')
+@Entity('room_images')
 export class RoomImage {
   @PrimaryGeneratedColumn()
   id: number;
@@ -240,21 +240,19 @@ export class RoomImage {
   @Column({ nullable: true })
   room_id: number;
 
-  @ManyToOne(() => Room, (room) => room.images, { onDelete: 'CASCADE', nullable: true })
+  @ManyToOne('Room', 'images', { onDelete: 'CASCADE', nullable: true })
   @JoinColumn({ name: 'room_id' })
-  room: Room;
+  room: any;
 
   @Column({ nullable: true })
-  room_types_id: number;
-
-  @Column()
+  room_types_id: number;  @Column()
   image_url: string;
 
   @CreateDateColumn()
   created_at: Date;
 }
 
-@Entity('SERVICES')
+@Entity('services')
 export class Service {
   @PrimaryGeneratedColumn()
   id: number;
