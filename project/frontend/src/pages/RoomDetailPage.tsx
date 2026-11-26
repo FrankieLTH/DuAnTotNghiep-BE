@@ -105,7 +105,20 @@ export const RoomDetailPage: React.FC<RoomDetailPageProps> = ({
     let active = true;
     setAvailability('checking');
     getRoomTypeOptions(room.room_type_id, checkInDate, checkOutDate, Math.max(1, guestCount - (searchParams?.children || 0)), { stayType: searchParams?.stayType, children: searchParams?.children || 0, rooms: searchParams?.rooms || 1 })
-      .then(rows => { if (active) { setOptions(rows); setAvailability(rows.some(row=>row.variantKey===selectedOptionKey) ? 'available' : 'unavailable'); } })
+      .then(rows => {
+        if (active) {
+          setOptions(rows);
+          if (rows.length > 0) {
+            const hasMatch = rows.some(row => row.variantKey === selectedOptionKey);
+            if (!hasMatch) {
+              setSelectedOptionKey(rows[0].variantKey);
+            }
+            setAvailability('available');
+          } else {
+            setAvailability('unavailable');
+          }
+        }
+      })
       .catch(() => { if (active) setAvailability('unavailable'); });
     return () => { active = false; };
   }, [room, checkInDate, checkOutDate, guestCount, searchParams?.stayType, searchParams?.children, searchParams?.rooms, selectedOptionKey, variants]);
@@ -133,7 +146,7 @@ export const RoomDetailPage: React.FC<RoomDetailPageProps> = ({
   const stayWindow = computeStayWindow(checkInDate,checkOutDate,searchParams?.stayType||'fullday');
   const nights = stayWindow.nightsOrDays;
 
-  const chosenOption = options.find(option => option.variantKey === selectedOptionKey);
+  const chosenOption = options.find(option => option.variantKey === selectedOptionKey) || options[0];
   const selectedVariant = variants.find(v=>String(v.roomTypeId)===selectedOptionKey);
   const displayRoom=variantRoom?.room_type_id===selectedVariant?.roomTypeId?variantRoom:room;
   const listedPricePerNight = selectedVariant?.basePrice ?? Number(room?.base_type_price ?? room?.base_price ?? 0);
@@ -250,7 +263,8 @@ export const RoomDetailPage: React.FC<RoomDetailPageProps> = ({
   const handleProceedSingleRoom = (optionOverride?: RoomTypeOption) => {
     const option = optionOverride || chosenOption;
     const variant = optionOverride ? variants.find(v => v.roomTypeId === optionOverride.roomTypeId) : selectedVariant;
-    if (!room || !option?.roomIds?.length) return;
+    if (!room || !option) return;
+    const effectiveRoomIds = option.roomIds?.length ? option.roomIds : [room.id];
     const nightly = option.basePricePerNight;
     const roomTotal = option.totalPrice;
     const stayNights = option.nights;
@@ -271,7 +285,7 @@ export const RoomDetailPage: React.FC<RoomDetailPageProps> = ({
       booking_rooms: [
         {
           room_type_id: option.roomTypeId,
-          room_ids:[option.roomIds[0]],features:[],feature_price_per_night:0,
+          room_ids:[effectiveRoomIds[0] || room.id],features:[],feature_price_per_night:0,
           room_type_name: option.name,
           room_type_image: displayRoom?.images[0] || room.images[0] || '',
           count: 1,

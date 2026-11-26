@@ -43,6 +43,7 @@ export class AvailabilityService {
             'https://images.unsplash.com/photo-1590490360182-c33d57733427?auto=format&fit=crop&w=800&q=80'
           )
         ) AS image,
+        GROUP_CONCAT(DISTINCT r.room_id) AS roomIdsStr,
         (
           COUNT(DISTINCT r.room_id) - COALESCE(occupied.occupied_count, 0)
         ) AS availableCount
@@ -92,7 +93,7 @@ export class AvailabilityService {
       parentId: r.parentId !== null && r.parentId !== undefined ? Number(r.parentId) : null,
       variantKey: `rt-${r.roomTypeId}`,
       variantLabel: String(r.name),
-      roomIds: [],
+      roomIds: r.roomIdsStr ? String(r.roomIdsStr).split(',').map(Number) : [],
       apartmentId: Number(r.apartmentId),
       apartmentName: String(r.apartmentName),
       name: String(r.name),

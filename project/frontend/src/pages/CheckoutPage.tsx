@@ -24,6 +24,10 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({
   onCompleteBooking,
   onDraftChange,
 }) => {
+  const todayStr = new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Bangkok' });
+  const checkoutDateObj = new Date(Date.now() + 2 * 86400000);
+  const checkoutStr = checkoutDateObj.toLocaleDateString('sv-SE', { timeZone: 'Asia/Bangkok' });
+
   const fallbackDraft: BookingDraft = {
     id: 'draft_default',
     booking_code: 'BK-202611-8942',
@@ -35,24 +39,24 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({
     room_type_image:
       'https://images.unsplash.com/photo-1590490360182-c33d57733427?auto=format&fit=crop&w=800&q=80',
     num_rooms: 1,
-    check_in_date: '2026-11-15',
-    check_out_date: '2026-11-17',
+    check_in_date: todayStr,
+    check_out_date: checkoutStr,
     nights: 2,
     num_adults: 2,
     num_children: 0,
     children_ages: [],
     price_breakdown: [
       {
-        date: '2026-11-15',
-        dayOfWeek: 'Chủ Nhật',
+        date: todayStr,
+        dayOfWeek: 'Ngày nhận phòng',
         basePrice: 550000,
         extraFeePercent: 0,
         extraFeeAmount: 0,
         finalPricePerRoom: 550000,
       },
       {
-        date: '2026-11-16',
-        dayOfWeek: 'Thứ Hai',
+        date: checkoutStr,
+        dayOfWeek: 'Ngày trả phòng',
         basePrice: 550000,
         extraFeePercent: 0,
         extraFeeAmount: 0,
@@ -104,7 +108,20 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({
     ],
   };
 
-  const [draft, setDraft] = useState<BookingDraft>(bookingData || fallbackDraft);
+  const initialDraft = (() => {
+    const raw = bookingData || fallbackDraft;
+    if (!raw.check_in_date || raw.check_in_date < todayStr || !raw.check_out_date || raw.check_out_date <= raw.check_in_date) {
+      return {
+        ...raw,
+        check_in_date: todayStr,
+        check_out_date: checkoutStr,
+        nights: 2,
+      };
+    }
+    return raw;
+  })();
+
+  const [draft, setDraft] = useState<BookingDraft>(initialDraft);
 
   // Helper tính tuổi tại thời điểm check-in
   const calculateAgeAtCheckIn = (dobString: string, checkInString?: string): number => {

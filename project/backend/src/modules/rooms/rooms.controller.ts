@@ -24,12 +24,23 @@ export class RoomsController {
     const type=await this.db.getRepository(RoomType).findOneBy({id,is_active:true});
     if(!type)throw new BadRequestException('Không tìm thấy loại phòng.');
     const parentId=type.parent_id??type.id;
-    const types=await this.db.getRepository(RoomType).find({where:{parent_id:parentId,is_active:true},order:{base_price:'ASC',id:'ASC'}});
+    let types=await this.db.getRepository(RoomType).find({where:{parent_id:parentId,is_active:true},order:{base_price:'ASC',id:'ASC'}});
+    if (!types.length) {
+      types = [type];
+    }
     const rooms=types.length
       ? await this.db.query('SELECT room_id,room_type_id FROM ROOMS WHERE is_hidden=0 AND deleted_at IS NULL AND room_type_id IN ('+types.map(()=>'?').join(',')+') ORDER BY room_id',types.map(row=>row.id))
       : [];
-    const amenRows=await this.db.query('SELECT ra.room_types_id AS typeId,a.id,a.name,a.category FROM room_amenities ra JOIN amenities a ON a.id=ra.amenity_id WHERE ra.room_types_id = ?',[parentId]);
-    return types.map(row=>({roomTypeId:row.id,roomId:rooms.find(room=>room.room_type_id===row.id)?.room_id,name:row.name,variantLabel:row.name,basePrice:Number(row.base_price),maxOccupancy:row.max_occupancy,amenities:amenRows.map(r=>({id:Number(r.id),name:r.name,category:r.category}))}));
+    const amenRows=await this.db.query('SELECT ra.room_types_id AS typeId,a.id,a.name,a.category FROM room_amenities ra JOIN amenities a ON a.id=ra.amenity_id WHERE ra.room_types_id IN ('+types.map(()=>'?').join(',')+')',types.map(t=>t.id));
+    return types.map(row=>({
+      roomTypeId:row.id,
+      roomId:rooms.find(room=>room.room_type_id===row.id)?.room_id,
+      name:row.name,
+      variantLabel:row.name,
+      basePrice:Number(row.base_price),
+      maxOccupancy:row.max_occupancy,
+      amenities:amenRows.filter(r=>Number(r.typeId)===row.id).map(r=>({id:Number(r.id),name:r.name,category:r.category}))
+    }));
   }
 
   @Get('room-types/:id/calendar')
