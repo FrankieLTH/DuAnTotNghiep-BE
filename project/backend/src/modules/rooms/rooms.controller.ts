@@ -25,7 +25,9 @@ export class RoomsController {
     if(!type)throw new BadRequestException('Không tìm thấy loại phòng.');
     const parentId=type.parent_id??type.id;
     const types=await this.db.getRepository(RoomType).find({where:{parent_id:parentId,is_active:true},order:{base_price:'ASC',id:'ASC'}});
-    const rooms=await this.db.query('SELECT room_id,room_type_id FROM ROOMS WHERE is_hidden=0 AND deleted_at IS NULL AND room_type_id IN ('+types.map(()=>'?').join(',')+') ORDER BY room_id',types.map(row=>row.id));
+    const rooms=types.length
+      ? await this.db.query('SELECT room_id,room_type_id FROM ROOMS WHERE is_hidden=0 AND deleted_at IS NULL AND room_type_id IN ('+types.map(()=>'?').join(',')+') ORDER BY room_id',types.map(row=>row.id))
+      : [];
     const amenRows=await this.db.query('SELECT ra.room_types_id AS typeId,a.id,a.name,a.category FROM room_amenities ra JOIN amenities a ON a.id=ra.amenity_id WHERE ra.room_types_id = ?',[parentId]);
     return types.map(row=>({roomTypeId:row.id,roomId:rooms.find(room=>room.room_type_id===row.id)?.room_id,name:row.name,variantLabel:row.name,basePrice:Number(row.base_price),maxOccupancy:row.max_occupancy,amenities:amenRows.map(r=>({id:Number(r.id),name:r.name,category:r.category}))}));
   }
@@ -64,7 +66,11 @@ export class RoomsController {
     if(!type)throw new BadRequestException('Không tìm thấy loại phòng.');
     const variants = await this.availabilityService.getAvailableRoomTypes({checkIn,checkOut,stayType,adults:count,children,rooms,apartmentId:type.apartment_id});
     const parentId=type.parent_id??type.id;
-    return variants.filter(v => v.parentId === parentId && v.maxOccupancy >= count).map(v => ({
+    // Khi parent_id = null, variant không có parentId => so sánh theo roomTypeId
+    return variants.filter(v => {
+      const vParent = (v.parentId !== null && v.parentId !== undefined) ? v.parentId : v.roomTypeId;
+      return vParent === parentId && v.maxOccupancy >= count;
+    }).map(v => ({
       variantKey:v.variantKey, roomTypeId:v.roomTypeId, roomIds:v.roomIds, availableCount:v.availableCount,
       name:v.name,variantLabel:v.variantLabel,maxOccupancy:v.maxOccupancy,
       features:v.features || [], featurePricePerNight:v.featurePricePerNight || 0,

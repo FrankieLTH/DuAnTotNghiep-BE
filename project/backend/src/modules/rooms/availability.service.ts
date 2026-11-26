@@ -28,6 +28,7 @@ export class AvailabilityService {
     const sql = `
       SELECT
         rt.id AS roomTypeId,
+        rt.parent_id AS parentId,
         rt.apartment_id AS apartmentId,
         apt.name AS apartmentName,
         rt.name AS name,
@@ -88,6 +89,10 @@ export class AvailabilityService {
 
     return rows.map((r: any) => ({
       roomTypeId: Number(r.roomTypeId),
+      parentId: r.parentId !== null && r.parentId !== undefined ? Number(r.parentId) : null,
+      variantKey: `rt-${r.roomTypeId}`,
+      variantLabel: String(r.name),
+      roomIds: [],
       apartmentId: Number(r.apartmentId),
       apartmentName: String(r.apartmentName),
       name: String(r.name),
@@ -97,6 +102,8 @@ export class AvailabilityService {
       area: Number(r.area),
       bedConfig: String(r.bedConfig),
       image: String(r.image),
+      features: [],
+      featurePricePerNight: 0,
     }));
   }
 }
