@@ -43,15 +43,14 @@ export class AvailabilityService {
             'https://images.unsplash.com/photo-1590490360182-c33d57733427?auto=format&fit=crop&w=800&q=80'
           )
         ) AS image,
-        GROUP_CONCAT(DISTINCT r.room_id) AS roomIdsStr,
-        (
-          COUNT(DISTINCT r.room_id) - COALESCE(occupied.occupied_count, 0)
-        ) AS availableCount
+        GROUP_CONCAT(DISTINCT CASE WHEN occ_room.room_id IS NULL THEN r.room_id ELSE NULL END) AS roomIdsStr,
+        COUNT(DISTINCT CASE WHEN occ_room.room_id IS NULL THEN r.room_id ELSE NULL END) AS availableCount
       FROM room_types rt
       JOIN APARTMENT apt ON rt.apartment_id = apt.id
       JOIN ROOMS r ON r.room_type_id = rt.id 
         AND r.is_hidden = 0 
         AND r.deleted_at IS NULL
+        AND r.status = 'available'
         AND NOT EXISTS (
           SELECT 1 FROM room_blocks rb 
           WHERE rb.room_id = r.room_id 
@@ -59,23 +58,20 @@ export class AvailabilityService {
             AND (rb.to_at IS NULL OR rb.to_at > ?)
         )
       LEFT JOIN (
-        SELECT
-          COALESCE(br.room_types_id, b.room_type_id, r_sub.room_type_id) AS room_type_id,
-          COUNT(DISTINCT COALESCE(br.id, b.id)) AS occupied_count
+        SELECT DISTINCT COALESCE(br.room_id, b.room_id) AS room_id
         FROM BOOKINGS b
         LEFT JOIN Booking_rooms br ON br.bookings_id = b.id
-        LEFT JOIN ROOMS r_sub ON r_sub.room_id = b.room_id
-        WHERE b.booking_status IN ('confirmed', 'checked_in', 'pending_payment')
-          AND (b.booking_status != 'pending_payment' OR b.hold_expires_at > NOW())
+        WHERE b.booking_status IN ('confirmed', 'checked_in', 'pending_payment', 'draft')
+          AND (b.booking_status NOT IN ('pending_payment', 'draft') OR b.hold_expires_at > NOW() OR b.hold_expires_at IS NULL)
           AND (
             (b.start_at IS NOT NULL AND b.start_at < ? AND b.end_at > ?)
             OR (b.booked_start_time < ? AND b.booked_end_time > ?)
           )
-        GROUP BY room_type_id
-      ) occupied ON occupied.room_type_id = rt.id
+          AND COALESCE(br.room_id, b.room_id) IS NOT NULL
+      ) occ_room ON occ_room.room_id = r.room_id
       WHERE rt.is_active = 1
         ${aptFilter}
-      GROUP BY rt.id, apt.id, occupied.occupied_count
+      GROUP BY rt.id, apt.id
       HAVING availableCount > 0
       ORDER BY basePrice ASC
     `;

@@ -102,20 +102,28 @@ export class CustomerAuthService implements OnModuleDestroy {
     // Luôn ghi vào memStore để dự phòng
     this.memSet(key, challenge, 300);
 
-    // Gửi email, nếu SMTP không cấu hình hoặc lỗi, in ra console và trả mã thử nghiệm
+    // Gửi email thật qua SMTP
     try {
       await this.mail.send(email, 'Mã xác thực Đồi Bông Gòn',
         `Mã xác thực của bạn: ${code}\nMã có hiệu lực 5 phút, chỉ dùng một lần cho ${purpose === 'lookup' ? 'tra cứu booking' : 'đặt phòng'}.`,
-        `<p>Mã xác thực của bạn: <strong>${code}</strong></p><p>Mã có hiệu lực 5 phút, chỉ dùng một lần cho ${purpose === 'lookup' ? 'tra cứu booking' : 'đặt phòng'}. Không chia sẻ mã này.</p>`);
-    } catch {
-      console.log(`\n======================================================\n[HOMESTAY ĐỒI BÔNG GÒN] Mã OTP của ${email}: [ ${code} ]\n======================================================\n`);
+        `<div style="font-family:sans-serif;max-width:500px;margin:auto;padding:20px;border:1px solid #E8DFD1;border-radius:12px;background:#FAF8F5;">
+          <h2 style="color:#C85A32;margin-top:0;">Homestay Đồi Bông Gòn</h2>
+          <p style="color:#3E2C23;font-size:14px;">Xin chào,</p>
+          <p style="color:#3E2C23;font-size:14px;">Mã xác thực OTP của bạn cho thao tác ${purpose === 'lookup' ? 'tra cứu booking' : 'đặt phòng'} là:</p>
+          <div style="text-align:center;margin:24px 0;">
+            <span style="font-size:32px;font-weight:bold;letter-spacing:6px;color:#C85A32;background:#FFF;padding:12px 24px;border-radius:8px;border:1px dashed #C85A32;display:inline-block;">${code}</span>
+          </div>
+          <p style="color:#8C7A70;font-size:12px;line-height:1.5;">Mã có hiệu lực trong vòng 5 phút. Vui lòng không chia sẻ mã này với bất kỳ ai để bảo vệ thông tin đặt phòng của bạn.</p>
+        </div>`);
+    } catch (mailError) {
+      console.error('Lỗi gửi email OTP:', mailError);
+      throw new ServiceUnavailableException('Không thể gửi email xác thực đến địa chỉ này. Vui lòng kiểm tra lại email hoặc thử lại sau.');
     }
 
     return { 
       message: 'Mã xác thực đã được gửi đến email của bạn.', 
       expires_in: 300, 
-      retry_after: 60,
-      dev_otp: code // Hỗ trợ hiển thị thử nghiệm khi local không có SMTP
+      retry_after: 60
     };
   }
 
@@ -124,10 +132,7 @@ export class CustomerAuthService implements OnModuleDestroy {
     const key = this.key(email, purpose);
     let valid = 0;
 
-    // Hỗ trợ mã test cố định 123456
-    if (code === '123456') {
-      valid = 1;
-    } else if (this.redisAvailable) {
+    if (this.redisAvailable) {
       try {
         valid = Number(await this.redis.eval(VERIFY, 1, key, this.digest(`${email}:${purpose}:${code}`)));
       } catch {
@@ -135,7 +140,7 @@ export class CustomerAuthService implements OnModuleDestroy {
       }
     }
 
-    if (!this.redisAvailable && code !== '123456') {
+    if (!this.redisAvailable) {
       const raw = this.memGet(key);
       if (!raw) {
         valid = -1;

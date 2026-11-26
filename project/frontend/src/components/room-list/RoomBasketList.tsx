@@ -542,7 +542,15 @@ export const RoomBasketList: React.FC<RoomBasketListProps> = ({
                     </span>
                   </div>
 
-                  {!canBook && <p className="max-w-xs text-right text-xs text-[#A83232]">{basket.totalRooms === 0 ? 'Chọn ít nhất 1 phòng để tiếp tục.' : `Sức chứa ${basket.totalCapacity} chưa đủ cho ${criteria.adults} người lớn.`}</p>}
+                  {!canBook && (
+                    <p className="max-w-xs text-right text-xs text-[#A83232] font-semibold">
+                      {!inventoryValid
+                        ? '⚠️ Hết phòng hoặc không đủ phòng trống cho thời gian này.'
+                        : basket.totalRooms === 0
+                        ? 'Chọn ít nhất 1 phòng để tiếp tục.'
+                        : `Sức chứa ${basket.totalCapacity} chưa đủ cho ${criteria.adults} người lớn.`}
+                    </p>
+                  )}
 
                   <button
                     type="button"

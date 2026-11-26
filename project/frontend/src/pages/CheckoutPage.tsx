@@ -211,7 +211,6 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({
   // OTP Email Verification
   const [otpSent, setOtpSent] = useState(false);
   const [otpCode, setOtpCode] = useState('');
-  const [devOtp, setDevOtp] = useState<string | null>(null);
   const [emailVerified, setEmailVerified] = useState(false);
   const [bookingScope, setBookingScope] = useState<'account' | 'lookup'>(bookingData?.customer_scope || 'lookup');
   const [walletAvailable, setWalletAvailable] = useState(0);
@@ -344,8 +343,7 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({
       return;
     }
     try {
-      const res = await customerService.requestOtp(bookerEmail, 'booking') as any;
-      if (res?.dev_otp) setDevOtp(res.dev_otp);
+      await customerService.requestOtp(bookerEmail, 'booking');
       setOtpCode('');
       setOtpSent(true);
     }
@@ -857,9 +855,9 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({
                         <div className="bg-[#F8F6F0] p-3 rounded-xl border border-[#D0C8BC] space-y-2 text-xs">
                           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                             <div>
-                              <span className="font-bold text-[#1A1615] block">Mã xác thực 6 số</span>
+                              <span className="font-bold text-[#1A1615] block">Mã xác thực OTP (6 chữ số)</span>
                               <span className="text-[10px] text-[#736B63]">
-                                Đã yêu cầu gửi mã đến {bookerEmail}. Mã có hiệu lực 5 phút.
+                                Hệ thống đã gửi mã OTP đến <strong>{bookerEmail}</strong>. Vui lòng kiểm tra Hộp thư đến (hoặc Thư rác/Spam). Mã có hiệu lực trong 5 phút.
                               </span>
                             </div>
                             <div className="flex items-center gap-2">
@@ -871,39 +869,17 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({
                                 inputMode="numeric"
                                 autoComplete="one-time-code"
                                 aria-label="Mã xác thực 6 số từ email"
-                                placeholder="Nhập mã"
-                                className="w-24 text-center tracking-widest font-mono font-bold bg-white border border-[#D0C8BC] rounded-lg px-2 py-1.5 text-xs"
+                                placeholder="Nhập 6 số"
+                                className="w-28 text-center tracking-widest font-mono font-bold bg-white border border-[#D0C8BC] rounded-lg px-2 py-1.5 text-xs focus:ring-1 focus:ring-[#C85A32]"
                               />
                               <button
                                 type="button"
                                 onClick={handleVerifyOtp}
-                                className="bg-[#2A694E] text-white px-3 py-1.5 rounded-lg font-bold hover:bg-[#1E4D39]"
+                                className="bg-[#2A694E] text-white px-3 py-1.5 rounded-lg font-bold hover:bg-[#1E4D39] text-xs transition-colors cursor-pointer shrink-0"
                               >
                                 Xác thực
                               </button>
                             </div>
-                          </div>
-
-                          {/* Gợi ý mã OTP nhanh cho môi trường test */}
-                          <div className="flex items-center gap-2 text-[11px] bg-emerald-50 text-emerald-800 p-2 rounded-lg border border-emerald-200">
-                            <span>💡 Thử nghiệm nhanh:</span>
-                            {devOtp ? (
-                              <button
-                                type="button"
-                                onClick={() => { setOtpCode(devOtp); }}
-                                className="underline font-bold text-emerald-900 cursor-pointer"
-                              >
-                                Bấm để điền mã vừa nhận: {devOtp}
-                              </button>
-                            ) : (
-                              <button
-                                type="button"
-                                onClick={() => { setOtpCode('123456'); }}
-                                className="underline font-bold text-emerald-900 cursor-pointer"
-                              >
-                                Bấm điền mã mặc định: 123456
-                              </button>
-                            )}
                           </div>
                         </div>
                       )}

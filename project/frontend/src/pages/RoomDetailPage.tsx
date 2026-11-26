@@ -633,9 +633,14 @@ export const RoomDetailPage: React.FC<RoomDetailPageProps> = ({
               {/* Offer rows: whole-stay price + conditions + scarcity + per-row Reserve (Booking.com room table) */}
               <div className="space-y-3 border-t pt-4">
                 <h3 className="font-semibold text-sm">Chọn hạng phòng &amp; giá trọn kỳ</h3>
+                {checkInDate && checkOutDate && variants.every(v => !options.find(o => o.roomTypeId === v.roomTypeId)?.roomIds?.length) && (
+                  <div className="p-3 bg-red-50 border border-red-200 rounded-xl text-xs text-red-700 font-medium">
+                    ⚠️ Rất tiếc, các hạng phòng này đã kín phòng trong khoảng thời gian bạn chọn ({checkInDate.split('-').reverse().join('/')} - {checkOutDate.split('-').reverse().join('/')}). Vui lòng chọn ngày khác trên lịch.
+                  </div>
+                )}
                 {variants.map(variant => {
                   const offer = options.find(o => o.roomTypeId === variant.roomTypeId);
-                  const canReserve = !!offer?.roomIds?.length;
+                  const canReserve = !!offer?.roomIds?.length && (offer.availableCount || 0) > 0;
                   return (
                     <div key={variant.roomTypeId} className={`border rounded-xl p-3 space-y-2 ${selectedOptionKey === String(variant.roomTypeId) ? 'border-[#C85A32] ring-1 ring-[#C85A32]' : 'border-[#E8DFD1]'} ${!checkInDate || !checkOutDate ? 'opacity-70' : ''}`}>
                       <div className="flex items-start justify-between gap-2">
@@ -646,12 +651,12 @@ export const RoomDetailPage: React.FC<RoomDetailPageProps> = ({
                           <span className="inline-block mt-1 text-[10px] px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">Hủy trước nhận phòng · hoàn 50% (duyệt)</span>
                         </div>
                         <div className="text-right">
-                          {offer ? (<><span className="block text-lg font-serif font-bold text-[#C85A32]">{offer.totalPrice.toLocaleString('vi-VN')}đ</span><span className="block text-[10px] text-[#795341]">{offer.nights} đêm · {offer.basePricePerNight.toLocaleString('vi-VN')}đ/đêm</span></>) : (<span className="block text-xs text-[#795341]">{!checkInDate || !checkOutDate ? 'Chọn ngày để xem giá' : 'Hết phòng khoảng ngày này'}</span>)}
+                          {offer && canReserve ? (<><span className="block text-lg font-serif font-bold text-[#C85A32]">{offer.totalPrice.toLocaleString('vi-VN')}đ</span><span className="block text-[10px] text-[#795341]">{offer.nights} đêm · {offer.basePricePerNight.toLocaleString('vi-VN')}đ/đêm</span></>) : (<span className="block text-xs font-semibold text-red-600">{!checkInDate || !checkOutDate ? 'Chọn ngày để xem giá' : 'Hết phòng khoảng ngày này'}</span>)}
                         </div>
                       </div>
                       <div className="flex items-center justify-between gap-2">
-                        <span className="text-[11px] text-[#B4532A] font-semibold">{offer ? (offer.availableCount === 1 ? 'Chỉ còn 1 phòng ở mức giá này' : `Còn ${offer.availableCount} phòng`) : ''}</span>
-                        <button type="button" disabled={!canReserve} onClick={() => { setSelectedOptionKey(String(variant.roomTypeId)); handleProceedSingleRoom(offer); }} className={`px-4 py-2 rounded-xl text-xs font-bold ${canReserve ? 'bg-[#C85A32] text-white hover:bg-[#A8481F]' : 'bg-stone-200 text-stone-400 cursor-not-allowed'}`}>Đặt</button>
+                        <span className="text-[11px] text-[#B4532A] font-semibold">{offer && canReserve ? (offer.availableCount === 1 ? 'Chỉ còn 1 phòng ở mức giá này' : `Còn ${offer.availableCount} phòng`) : <span className="text-red-500 font-normal">Không khả dụng</span>}</span>
+                        <button type="button" disabled={!canReserve} onClick={() => { setSelectedOptionKey(String(variant.roomTypeId)); handleProceedSingleRoom(offer); }} className={`px-4 py-2 rounded-xl text-xs font-bold transition-colors ${canReserve ? 'bg-[#C85A32] text-white hover:bg-[#A8481F] cursor-pointer' : 'bg-stone-200 text-stone-400 cursor-not-allowed'}`}>Đặt</button>
                       </div>
                     </div>
                   );
@@ -660,11 +665,30 @@ export const RoomDetailPage: React.FC<RoomDetailPageProps> = ({
 
               <label className="flex items-center gap-2 text-sm border-t pt-3"><input type="checkbox" checked={extraMattress} onChange={e => setExtraMattress(e.target.checked)} /> Nệm phụ</label>
 
-              {sourceBasket && (
-                <Button variant="primary" size="lg" className="w-full font-bold uppercase tracking-wider" disabled={room.status !== 'available'} onClick={handleProceedWithBasket}>
-                  <span>Tiếp tục đặt trọn Giỏ này ({sourceBasket.totalRooms} phòng) →</span>
-                </Button>
-              )}<div className="text-[11px] text-center text-[#8C7A70] space-y-1">
+              {sourceBasket && (() => {
+                const isBasketFeasible = sourceBasket.items.every(it => {
+                  const opt = options.find(o => o.roomTypeId === it.roomTypeId);
+                  return opt && (opt.availableCount || 0) >= it.quantity;
+                });
+                return (
+                  <div className="space-y-2">
+                    {!isBasketFeasible && checkInDate && checkOutDate && (
+                      <p className="text-xs text-red-600 font-semibold text-center">
+                        ⚠️ Giỏ phòng này đã hết chỗ trong khoảng thời gian đã chọn.
+                      </p>
+                    )}
+                    <Button
+                      variant="primary"
+                      size="lg"
+                      className="w-full font-bold uppercase tracking-wider disabled:opacity-40 disabled:cursor-not-allowed"
+                      disabled={!isBasketFeasible || room.status !== 'available'}
+                      onClick={isBasketFeasible ? handleProceedWithBasket : undefined}
+                    >
+                      <span>{isBasketFeasible ? `Tiếp tục đặt trọn Giỏ này (${sourceBasket.totalRooms} phòng) →` : 'Đã kín phòng khoảng ngày này'}</span>
+                    </Button>
+                  </div>
+                );
+              })()}<div className="text-[11px] text-center text-[#8C7A70] space-y-1">
                 <p>⚡ Nhận phòng tự động 24/7 với Smart Lock TTLock</p>
                 <p>📞 Hotline quản gia 24/7: <strong>0901.234.567</strong></p>
               </div>

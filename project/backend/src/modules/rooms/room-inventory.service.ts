@@ -9,11 +9,15 @@ export interface AvailableRoomUnit {
 @Injectable()
 export class RoomInventoryService {
   constructor(private db: DataSource) {}
-  async available(typeIds:number[],start:Date,end:Date,manager:EntityManager=this.db.manager,excludeBookingId=0):Promise<AvailableRoomUnit[]> {
+  async available(typeIds:number[],start:Date,end:Date,manager:EntityManager=this.db.manager,excludeBookingId=0,apartmentId?:number):Promise<AvailableRoomUnit[]> {
     if(!typeIds.length)return [];
-    const rooms=await manager.getRepository(Room).createQueryBuilder('r').leftJoinAndSelect('r.room_type','t').leftJoinAndSelect('t.parent','tp').leftJoinAndSelect('r.apartment','a')
+    let qb = manager.getRepository(Room).createQueryBuilder('r').leftJoinAndSelect('r.room_type','t').leftJoinAndSelect('t.parent','tp').leftJoinAndSelect('r.apartment','a')
       .where('r.room_type_id IN (:...types)',{types:typeIds}).andWhere('r.is_hidden=0 AND r.deleted_at IS NULL')
-      .andWhere("r.status IN ('available','occupied') AND r.housekeeping='clean'").orderBy('r.room_id').getMany();
+      .andWhere("r.status = 'available' AND r.housekeeping='clean'");
+    if (apartmentId) {
+      qb = qb.andWhere('r.apartment_id = :aptId', { aptId: apartmentId });
+    }
+    const rooms = await qb.orderBy('r.room_id').getMany();
     const bookings=await manager.getRepository(Booking).createQueryBuilder('b').leftJoinAndSelect('b.booking_rooms','br').leftJoinAndSelect('b.room','legacy')
       .where('b.id != :exclude',{exclude:excludeBookingId}).andWhere('b.booked_start_time<:end AND b.booked_end_time>:start',{start,end})
       .andWhere("(b.booking_status IN ('confirmed','checked_in') OR (b.booking_status IN ('draft','pending_payment') AND (b.hold_expires_at> :now OR (b.hold_expires_at IS NULL AND b.room_id IS NOT NULL))))",{now:new Date()}).getMany();

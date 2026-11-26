@@ -234,7 +234,7 @@ export class CustomerBookingsService {
       }
       if (new Set(types.map(t => t.apartment_id)).size !== 1) throw new BadRequestException('Các phòng phải thuộc cùng một chi nhánh.');
       if (types.reduce((sum, t) => sum + t.max_occupancy * quantities.get(t.id), extraBedCount) < data.adults) throw new BadRequestException('Số khách vượt sức chứa phòng.');
-      const available=await this.inventory.available(types.map(t=>t.id),start,end,manager);
+      const available=await this.inventory.available(types.map(t=>t.id),start,end,manager,0,types[0].apartment_id);
       const used=new Set<number>();const quoted:any[]=[];
       for(const selection of selected){
         const requested=selection.room_ids;
