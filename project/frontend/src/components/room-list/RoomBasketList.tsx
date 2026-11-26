@@ -239,10 +239,21 @@ export const RoomBasketList: React.FC<RoomBasketListProps> = ({
         </div>
       </div>
 
-      {/* DANH SÁCH GIỎ PHÒNG */}
+      {/* DANH SÁCH GIỎ PHÒNG - CHỈ HIỂN THỊ CÁC GIỎ ĐÁP ỨNG ĐỦ PHÒNG TRỐNG */}
       <div className="space-y-8">
-        {baskets.slice(0, visibleCount).map((rawBasket, bIndex) => {
-          const basket = getEnrichedBasket(rawBasket);
+        {baskets
+          .filter((rawBasket) => {
+            const basket = getEnrichedBasket(rawBasket);
+            return basket.items.every((item, itemIdx) => {
+              const options = variantOptions[itemKey(basket.id, itemIdx)];
+              if (!options || !options.length) return true;
+              const option = options.find(o => o.roomTypeId === item.roomTypeId);
+              return option && option.availableCount >= item.quantity;
+            });
+          })
+          .slice(0, visibleCount)
+          .map((rawBasket, bIndex) => {
+            const basket = getEnrichedBasket(rawBasket);
           const isBestFit = basket.tags.includes('exact_fit');
           const isCheapest = basket.tags.includes('cheapest');
           const inventoryValid = basket.items.every((item, itemIdx) => {

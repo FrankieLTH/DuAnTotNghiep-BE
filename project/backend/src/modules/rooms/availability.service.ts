@@ -72,15 +72,17 @@ export class AvailabilityService {
       WHERE rt.is_active = 1
         ${aptFilter}
       GROUP BY rt.id, apt.id
-      HAVING availableCount > 0
+      HAVING availableCount >= ?
       ORDER BY basePrice ASC
     `;
 
-    // params order: [blockEndAt, blockStartAt, bookingEndAt, bookingStartAt, bookingEndAt, bookingStartAt, apartmentId?]
+    // params order: [blockEndAt, blockStartAt, bookingEndAt, bookingStartAt, bookingEndAt, bookingStartAt, apartmentId?, minRooms]
     const queryParams: any[] = [endAt, startAt, endAt, startAt, endAt, startAt];
     if (criteria.apartmentId && Number(criteria.apartmentId) > 0) {
       queryParams.push(Number(criteria.apartmentId));
     }
+    const minRooms = Math.max(1, Number(criteria.rooms || 1));
+    queryParams.push(minRooms);
 
     const rows = await this.dataSource.query(sql, queryParams);
 
