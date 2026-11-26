@@ -193,26 +193,13 @@ export class Room {
   @Column({ type: 'varchar', length: 500, nullable: true, comment: 'Mô tả đặc điểm đặc biệt của phòng (nhập tay, không ảnh hưởng giá)' })
   special_features?: string | null;
 
-  @Column({ default: 0 })
-  floor: number;
+  get room_group_name(): string | undefined {
+    return this.room_group?.name;
+  }
 
-  @Column({ type: 'varchar', length: 100, nullable: true })
-  room_group_name: string;
-
-  @Column({ type: 'text', nullable: true })
-  note: string;
-
-  @Column({ default: 'clean' })
-  housekeeping: 'clean' | 'dirty';
-
-  @Column({ type: 'datetime', nullable: true })
-  deleted_at: Date;
-
-  @Column({ type: 'json', nullable: true })
-  feature_ids: number[];
-
-  @Column({ type: 'json', nullable: true })
-  blocked_periods: { id: number; room_id: number; from_at: string; to_at: string | null; reason: string; created_by: string; created_at: string }[];
+  get blocked_periods(): any[] {
+    return this.room_blocks || [];
+  }
 
   @Column({ type: 'date', nullable: true })
   last_maintenance_date: string;
@@ -321,13 +308,5 @@ export class StayTypeConfig {
 }
 
 
-@Entity('room_features')
-export class RoomFeature {
-  @PrimaryGeneratedColumn() id: number;
-  @Column({ unique: true, length: 100 }) name: string;
-  @Column({ length: 20 }) category: string;
-  @Column('decimal', { precision: 12, scale: 2, default: 0 }) extra_price_per_night: number;
-  @Column({ default: true }) is_active: boolean;
-  @CreateDateColumn() created_at: Date;
-}
+
 

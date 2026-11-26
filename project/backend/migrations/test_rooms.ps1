@@ -7,4 +7,4 @@ $headers = @{
 
 $rooms = Invoke-RestMethod -Uri 'http://localhost:3000/api/admin/rooms' -Method GET -Headers $headers
 Write-Output "Total rooms fetched: $($rooms.Count)"
-$rooms | Select-Object -First 3 | Format-Table -Property id, room_number, apartment_name, room_type_name, status, display_status
+$rooms | Select-Object -First 3 | Format-Table -Property room_id, room_number, apartment_name, room_type_name, status, display_status

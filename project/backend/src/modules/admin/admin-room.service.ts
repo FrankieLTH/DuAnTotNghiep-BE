@@ -417,6 +417,10 @@ export class AdminRoomService {
     return { success: true, message: `Đã tạm ẩn loại phòng "${rt.name}".` };
   }
 
+  async deleteRoomType(id: number, actor: string) {
+    return this.hideRoomType(id, actor);
+  }
+
   // ==========================================================================
   // B. QUẢN LÝ PHÒNG CỤ THỂ (ROOMS)
   // ==========================================================================

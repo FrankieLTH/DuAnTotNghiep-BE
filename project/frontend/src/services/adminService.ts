@@ -1969,7 +1969,7 @@ export const adminApi = {
           room_id: currentMaxId,
           room_number: item.roomNumber,
           floor: item.floor ?? 0,
-          room_group_id: item.roomGroupId || null,
+          room_group_id: item.roomGroupId ? Number(item.roomGroupId) : null,
           note: item.note || null,
           housekeeping: 'clean',
           deleted_at: null,

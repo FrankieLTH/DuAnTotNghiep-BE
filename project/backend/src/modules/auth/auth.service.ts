@@ -37,7 +37,13 @@ export class AuthService {
 
     await this.userRepository.save(user);
 
-    const payload = { sub: user.id, email: user.email, role_id: user.role_id };
+    const isStaff = [1, 2].includes(Number(user.role_id));
+    const payload: any = {
+      sub: user.id,
+      email: user.email,
+      role_id: user.role_id,
+      ...(isStaff ? { type: 'staff', staff_id: user.id } : {}),
+    };
     return {
       message: 'Đăng ký tài khoản thành công',
       access_token: this.jwtService.sign(payload),
@@ -70,7 +76,13 @@ export class AuthService {
       throw new UnauthorizedException('Tài khoản của bạn đã bị khóa');
     }
 
-    const payload = { sub: user.id, email: user.email, role_id: user.role_id };
+    const isStaff = [1, 2].includes(Number(user.role_id));
+    const payload: any = {
+      sub: user.id,
+      email: user.email,
+      role_id: user.role_id,
+      ...(isStaff ? { type: 'staff', staff_id: user.id } : {}),
+    };
     return {
       message: 'Đăng nhập thành công',
       access_token: this.jwtService.sign(payload),

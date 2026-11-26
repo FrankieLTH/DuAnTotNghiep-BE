@@ -312,9 +312,9 @@ export const BatchCreateModal: React.FC<BatchCreateModalProps> = ({
   const getRoomTypeName = (typeId: number) => {
     return roomTypes.find((rt) => rt.id === typeId)?.name || `#${typeId}`;
   };
-  const getRoomGroupName = (groupId?: number | null) => {
+  const getRoomGroupName = (groupId?: number | string | null) => {
     if (!groupId) return '—';
-    return roomGroups.find((rg) => rg.id === groupId)?.name || `#${groupId}`;
+    return roomGroups.find((rg) => rg.id === Number(groupId))?.name || `#${groupId}`;
   };
   const getFeatureName = (featId: number) => {
     return roomFeatures.find((f) => f.id === featId)?.name || `#${featId}`;
