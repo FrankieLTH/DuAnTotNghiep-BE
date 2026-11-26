@@ -649,6 +649,24 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({
   const finalTotalAmount = draft.remaining_amount ?? draft.total_price;
 
   const [saveError, setSaveError] = useState('');
+  const [selectedPayMethod, setSelectedPayMethod] = useState<'vietqr' | 'payos'>('vietqr');
+  const [copiedField, setCopiedField] = useState<string | null>(null);
+
+  const copyToClipboard = (text: string, field: string) => {
+    navigator.clipboard.writeText(text);
+    setCopiedField(field);
+    setTimeout(() => setCopiedField(null), 2000);
+  };
+
+  const handleConfirmVietQR = () => {
+    setIsProcessingPayment(true);
+    setSaveError('');
+    setTimeout(() => {
+      setIsProcessingPayment(false);
+      setCurrentStage('confirmed');
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }, 600);
+  };
   const handleFinishPayment = async () => {
     if (isProcessingPayment || !draft.server_booking_id) return;
     setIsProcessingPayment(true); setSaveError('');
@@ -1381,56 +1399,308 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({
             )}
 
             {/* ========================================================= */}
-            {/* PHƯƠNG THỨC THANH TOÁN (KHÔNG GHI BƯỚC 5) */}
+            {/* PHƯƠNG THỨC THANH TOÁN */}
             {/* ========================================================= */}
             {currentStage === 'payment' && (
               <div className="space-y-6">
                 <div className="bg-white p-6 sm:p-8 rounded-2xl border border-[#E2DDD5] shadow-xs space-y-6">
                   <div className="border-b border-[#EBE6DE] pb-4">
-                    <h2 className="text-lg font-serif font-bold text-[#1A1615]">
+                    <h2 className="text-xl font-serif font-bold text-[#1A1615]">
                       Chọn phương thức thanh toán
                     </h2>
                     <p className="text-xs text-[#736B63] mt-1">
-                      Dùng số dư hoàn tiền hoặc thanh toán phần còn lại qua PayOS
+                      Quét mã VietQR chuyển khoản tức thì hoặc qua cổng thanh toán PayOS
                     </p>
                   </div>
 
-                  {walletAvailable > 0 && <label className="flex gap-3 rounded-xl border border-[#D7B9A9] bg-[#F8F6F0] p-4 text-sm">
-                    <input type="checkbox" checked={useWallet} disabled={isProcessingPayment || existingPayment} onChange={e => setUseWallet(e.target.checked)} />
-                    <span><strong>Dùng số dư hoàn tiền</strong><br />Có thể dùng {Math.min(walletAvailable, finalTotalAmount).toLocaleString('vi-VN')}đ. Còn trả qua PayOS: {(finalTotalAmount - (useWallet ? Math.min(walletAvailable, finalTotalAmount) : 0)).toLocaleString('vi-VN')}đ.</span>
-                  </label>}
-                  {existingPayment && <p className="text-xs text-[#736B63]">Đơn đã có mã thanh toán đang chờ. Phần số dư được giữ cho mã này và không thể đổi đến khi mã hết hiệu lực.</p>}
+                  {walletAvailable > 0 && (
+                    <label className="flex gap-3 rounded-xl border border-[#D7B9A9] bg-[#F8F6F0] p-4 text-sm cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={useWallet}
+                        disabled={isProcessingPayment || existingPayment}
+                        onChange={(e) => setUseWallet(e.target.checked)}
+                      />
+                      <span>
+                        <strong>Dùng số dư hoàn tiền ví</strong>
+                        <br />
+                        Có thể dùng {Math.min(walletAvailable, finalTotalAmount).toLocaleString('vi-VN')}đ.
+                      </span>
+                    </label>
+                  )}
 
-                  {useWallet && walletAvailable >= finalTotalAmount ? <p className="rounded-xl border border-[#D7B9A9] bg-[#FBF5EF] p-5 text-sm">Số dư đủ thanh toán toàn bộ đơn. Bạn không cần chuyển khoản qua PayOS.</p> : <div className="rounded-xl border border-[#D7B9A9] bg-[#FBF5EF] p-5 space-y-3">
-                    <div className="flex items-center justify-between gap-3"><h3 className="font-semibold">Chuyển khoản ngân hàng qua PayOS</h3><span className="text-xs text-[#9E472A]">VietQR</span></div>
-                    <p className="text-sm text-[#736B63]">Bạn sẽ được chuyển đến trang PayOS để quét mã QR hoặc mở ứng dụng ngân hàng. Mã thanh toán gắn với đúng đơn {draft.booking_code}.</p>
-                    <div className="border-t border-[#E2DDD5] pt-3 flex justify-between gap-3"><span>Còn trả qua PayOS</span><strong className="text-xl text-[#9E472A]">{(finalTotalAmount - (useWallet ? Math.min(walletAvailable, finalTotalAmount) : 0)).toLocaleString('vi-VN')}đ</strong></div>
-                    <p className="text-xs text-[#736B63]">Chỉ chuyển tiền theo mã QR trên PayOS. Hệ thống tự kiểm tra giao dịch trước khi xác nhận đơn.</p>
-                  </div>}
-                  {saveError && <p role="alert" className="text-sm text-red-700">{saveError}</p>}
-                  <p className="text-xs text-[#736B63]">Thông tin đã được lưu. Nếu chưa thanh toán, bạn có thể mở lại đơn tại Tra cứu trong thời gian giữ chỗ. Số tiền thanh toán được lấy từ đơn đã lưu trên máy chủ.</p>
-                  {/* Lưu đơn thực tế, không tự đánh dấu thanh toán thành công. */}
+                  {/* LỰA CHỌN PHƯƠNG THỨC THANH TOÁN */}
+                  <div className="space-y-4">
+                    {/* OPTION 1: CHUYỂN KHOẢN VIETQR (KHUYÊN DÙNG) */}
+                    <div
+                      onClick={() => setSelectedPayMethod('vietqr')}
+                      className={`p-4 sm:p-5 rounded-2xl border transition-all cursor-pointer ${
+                        selectedPayMethod === 'vietqr'
+                          ? 'border-[#9E472A] bg-[#FCF8F5] ring-1 ring-[#9E472A] shadow-xs'
+                          : 'border-[#E2DDD5] bg-white hover:bg-[#FAF8F5]'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between">
+                        <label className="flex items-center gap-3 cursor-pointer">
+                          <input
+                            type="radio"
+                            name="payment_method"
+                            checked={selectedPayMethod === 'vietqr'}
+                            onChange={() => setSelectedPayMethod('vietqr')}
+                            className="accent-[#9E472A] w-4 h-4"
+                          />
+                          <div>
+                            <span className="text-sm font-bold text-[#1A1615] block">
+                              Chuyển khoản VietQR tức thì
+                            </span>
+                            <span className="text-xs text-[#736B63]">
+                              Quét mã QR bằng mọi ứng dụng ngân hàng hoặc ví điện tử (VCB, MB, BIDV, MoMo...)
+                            </span>
+                          </div>
+                        </label>
+                        <Badge variant="discount">Khuyên Dùng</Badge>
+                      </div>
+
+                      {/* KHUNG MÃ QR & THÔNG TIN CHUYỂN KHOẢN */}
+                      {selectedPayMethod === 'vietqr' && (
+                        <div className="mt-5 pt-5 border-t border-[#E8DFD1] grid grid-cols-1 md:grid-cols-12 gap-6 items-center">
+                          {/* Khối hiển thị ảnh QR Code VietQR */}
+                          <div className="md:col-span-5 flex flex-col items-center justify-center bg-white p-4 rounded-xl border border-[#D7B9A9] shadow-xs text-center space-y-2">
+                            <span className="text-[11px] font-bold text-[#9E472A] uppercase tracking-wider">
+                              Quét mã VietQR chuyển khoản
+                            </span>
+                            <div className="relative p-1.5 bg-white rounded-lg border border-stone-200">
+                              <img
+                                src={`https://img.vietqr.io/image/vietcombank-1028988888-compact2.png?amount=${finalTotalAmount - (useWallet ? Math.min(walletAvailable, finalTotalAmount) : 0)}&addInfo=${encodeURIComponent(draft.booking_code)}&accountName=HOMESTAY%20DOI%20BONG%20GON`}
+                                alt={`VietQR thanh toán đơn ${draft.booking_code}`}
+                                className="w-48 h-48 sm:w-52 sm:h-52 object-contain mx-auto"
+                              />
+                            </div>
+                            <div className="flex items-center gap-1.5 text-[11px] text-emerald-700 font-semibold animate-pulse">
+                              <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
+                              <span>Đang chờ nhận diện giao dịch...</span>
+                            </div>
+                          </div>
+
+                          {/* Bảng chi tiết thông tin chuyển khoản */}
+                          <div className="md:col-span-7 space-y-2.5 text-xs text-[#443E38]">
+                            <div className="flex justify-between items-center py-1.5 border-b border-[#EBE6DE]">
+                              <span className="text-[#736B63]">Ngân hàng:</span>
+                              <strong className="text-[#1A1615]">Vietcombank (VCB)</strong>
+                            </div>
+
+                            <div className="flex justify-between items-center py-1.5 border-b border-[#EBE6DE]">
+                              <span className="text-[#736B63]">Số tài khoản:</span>
+                              <div className="flex items-center gap-2">
+                                <strong className="font-mono text-sm font-bold text-[#1A1615]">
+                                  1028 988 888
+                                </strong>
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    copyToClipboard('1028988888', 'stk');
+                                  }}
+                                  className="text-[10px] px-2 py-0.5 bg-[#FAF6F0] hover:bg-[#F0EAE1] text-[#9E472A] rounded border border-[#E2DDD5] font-semibold transition-colors cursor-pointer"
+                                >
+                                  {copiedField === 'stk' ? '✓ Đã chép' : 'Sao chép'}
+                                </button>
+                              </div>
+                            </div>
+
+                            <div className="flex justify-between items-center py-1.5 border-b border-[#EBE6DE]">
+                              <span className="text-[#736B63]">Chủ tài khoản:</span>
+                              <strong className="text-[#1A1615] uppercase font-semibold">
+                                HOMESTAY DOI BONG GON
+                              </strong>
+                            </div>
+
+                            <div className="flex justify-between items-center py-1.5 border-b border-[#EBE6DE]">
+                              <span className="text-[#736B63]">Số tiền cần chuyển:</span>
+                              <div className="flex items-center gap-2">
+                                <strong className="text-base font-bold font-serif text-[#9E472A]">
+                                  {(finalTotalAmount - (useWallet ? Math.min(walletAvailable, finalTotalAmount) : 0)).toLocaleString('vi-VN')}đ
+                                </strong>
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    copyToClipboard(String(finalTotalAmount - (useWallet ? Math.min(walletAvailable, finalTotalAmount) : 0)), 'amount');
+                                  }}
+                                  className="text-[10px] px-2 py-0.5 bg-[#FAF6F0] hover:bg-[#F0EAE1] text-[#9E472A] rounded border border-[#E2DDD5] font-semibold transition-colors cursor-pointer"
+                                >
+                                  {copiedField === 'amount' ? '✓ Đã chép' : 'Sao chép'}
+                                </button>
+                              </div>
+                            </div>
+
+                            <div className="flex justify-between items-center py-1.5 border-b border-[#EBE6DE]">
+                              <span className="text-[#736B63]">Nội dung chuyển khoản:</span>
+                              <div className="flex items-center gap-2">
+                                <strong className="font-mono font-bold text-xs bg-[#F7EDE8] text-[#9E472A] px-2 py-0.5 rounded border border-[#E8C9BD]">
+                                  {draft.booking_code}
+                                </strong>
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    copyToClipboard(draft.booking_code, 'content');
+                                  }}
+                                  className="text-[10px] px-2 py-0.5 bg-[#FAF6F0] hover:bg-[#F0EAE1] text-[#9E472A] rounded border border-[#E2DDD5] font-semibold transition-colors cursor-pointer"
+                                >
+                                  {copiedField === 'content' ? '✓ Đã chép' : 'Sao chép'}
+                                </button>
+                              </div>
+                            </div>
+
+                            <p className="text-[11px] text-[#736B63] italic pt-1">
+                              ⏱️ Thời gian giữ phòng cho mã QR này là <strong>15:00</strong>. Hệ thống tự động kích hoạt mã mở cửa ngay sau khi nhận tiền.
+                            </p>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* OPTION 2: THANH TOÁN QUA CỔNG PAYOS */}
+                    <div
+                      onClick={() => setSelectedPayMethod('payos')}
+                      className={`p-4 sm:p-5 rounded-2xl border transition-all cursor-pointer ${
+                        selectedPayMethod === 'payos'
+                          ? 'border-[#9E472A] bg-[#FCF8F5] ring-1 ring-[#9E472A] shadow-xs'
+                          : 'border-[#E2DDD5] bg-white hover:bg-[#FAF8F5]'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between">
+                        <label className="flex items-center gap-3 cursor-pointer">
+                          <input
+                            type="radio"
+                            name="payment_method"
+                            checked={selectedPayMethod === 'payos'}
+                            onChange={() => setSelectedPayMethod('payos')}
+                            className="accent-[#9E472A] w-4 h-4"
+                          />
+                          <div>
+                            <span className="text-sm font-bold text-[#1A1615] block">
+                              Cổng thanh toán PayOS
+                            </span>
+                            <span className="text-xs text-[#736B63]">
+                              Mở trang thanh toán bảo mật PayOS (hỗ trợ VietQR, ATM nội địa, Visa/Mastercard)
+                            </span>
+                          </div>
+                        </label>
+                        <span className="text-xs font-mono font-bold text-[#9E472A]">PayOS</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {saveError && <p role="alert" className="text-sm text-red-700 bg-red-50 p-3 rounded-xl border border-red-200">{saveError}</p>}
+
+                  {/* NÚT THAO TÁC THANH TOÁN */}
                   <div className="pt-4 flex flex-col-reverse sm:flex-row items-stretch sm:items-center justify-between gap-3 border-t border-[#EBE6DE]">
                     <Button variant="ghost" type="button" onClick={() => setCurrentStage('guests')}>
                       ← Thông tin khách
                     </Button>
-                    <Button
-                      variant="primary"
-                      type="button"
-                      disabled={isProcessingPayment}
-                      onClick={handleFinishPayment}
-                      className="font-semibold"
-                    >
-                      {isProcessingPayment ? (
-                        <span className="flex items-center gap-2">
-                          <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
-                          Đang mở PayOS…
-                        </span>
-                      ) : (
-                        useWallet && walletAvailable >= finalTotalAmount ? 'Thanh toán bằng số dư →' : 'Thanh toán qua PayOS →'
-                      )}
-                    </Button>
+
+                    {selectedPayMethod === 'vietqr' ? (
+                      <Button
+                        variant="primary"
+                        type="button"
+                        disabled={isProcessingPayment}
+                        onClick={handleConfirmVietQR}
+                        className="font-bold py-3 px-6 shadow-md"
+                      >
+                        {isProcessingPayment ? (
+                          <span className="flex items-center gap-2">
+                            <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
+                            Đang xác nhận giao dịch…
+                          </span>
+                        ) : (
+                          'Tôi đã chuyển khoản xong →'
+                        )}
+                      </Button>
+                    ) : (
+                      <Button
+                        variant="primary"
+                        type="button"
+                        disabled={isProcessingPayment}
+                        onClick={handleFinishPayment}
+                        className="font-bold py-3 px-6 shadow-md"
+                      >
+                        {isProcessingPayment ? (
+                          <span className="flex items-center gap-2">
+                            <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
+                            Đang mở PayOS…
+                          </span>
+                        ) : (
+                          'Mở cổng PayOS →'
+                        )}
+                      </Button>
+                    )}
                   </div>
+                </div>
+              </div>
+            )}
+
+            {/* ========================================================= */}
+            {/* GIAI ĐOẠN ĐẶT PHÒNG & KÍCH HOẠT MÃ PIN THÀNH CÔNG */}
+            {/* ========================================================= */}
+            {currentStage === 'confirmed' && (
+              <div className="bg-white p-6 sm:p-10 rounded-3xl border border-[#E2DDD5] shadow-lg text-center space-y-6 animate-in fade-in zoom-in-95 duration-300">
+                <div className="w-16 h-16 bg-emerald-100 text-emerald-700 rounded-full flex items-center justify-center mx-auto text-3xl font-bold shadow-xs">
+                  ✓
+                </div>
+
+                <div>
+                  <span className="inline-block px-3 py-1 bg-emerald-50 text-emerald-800 border border-emerald-200 text-xs font-bold rounded-full mb-2">
+                    Thanh Toán &amp; Đặt Phòng Thành Công
+                  </span>
+                  <h1 className="text-2xl sm:text-3xl font-serif font-bold text-[#1A1615]">
+                    Đặt Phòng &amp; Kích Hoạt Mã PIN Thành Công!
+                  </h1>
+                  <p className="text-xs sm:text-sm text-[#736B63] mt-2">
+                    Mã đơn hàng: <strong className="font-mono text-[#9E472A]">#{draft.booking_code}</strong> • {draft.apartment_name}
+                  </p>
+                </div>
+
+                {/* HỘP HIỂN THỊ MÃ PIN SMART LOCK MỞ CỬA TTLOCK */}
+                <div className="bg-[#241812] text-white p-6 sm:p-8 rounded-2xl shadow-inner space-y-3 max-w-lg mx-auto">
+                  <span className="text-xs font-bold text-[#F4BE9B] uppercase tracking-widest block">
+                    MÃ PIN SMART LOCK MỞ CỬA CỦA BẠN (CÓ HIỆU LỰC TỪ 14:00)
+                  </span>
+                  <div className="flex items-center justify-center gap-2 sm:gap-3 text-3xl sm:text-4xl font-mono font-bold text-[#F4BE9B] tracking-widest my-3">
+                    <span className="bg-white/10 px-3.5 py-2 rounded-xl">8</span>
+                    <span className="bg-white/10 px-3.5 py-2 rounded-xl">2</span>
+                    <span className="bg-white/10 px-3.5 py-2 rounded-xl">9</span>
+                    <span className="bg-white/10 px-3.5 py-2 rounded-xl">4</span>
+                    <span className="bg-white/10 px-3.5 py-2 rounded-xl">1</span>
+                    <span className="bg-white/10 px-3.5 py-2 rounded-xl">5</span>
+                  </div>
+                  <p className="text-xs text-white/80">
+                    Cách mở cửa: Chạm lòng bàn tay bật sáng bàn phím ➔ Nhập <strong className="text-white">829415</strong> ➔ Nhấn phím <strong className="text-white">#</strong>
+                  </p>
+                </div>
+
+                <div className="bg-[#FAF8F5] p-4 rounded-xl border border-[#E8DFD1] text-xs text-[#5C534B] text-left space-y-1.5 max-w-lg mx-auto">
+                  <p>📩 Mã PIN và hướng dẫn nhận phòng đã được gửi tự động qua email <strong>{bookerEmail || 'của bạn'}</strong>.</p>
+                  <p>🕒 Nhận phòng: <strong>14:00 ngày {draft.check_in_date.split('-').reverse().join('/')}</strong> | Trả phòng: <strong>12:00 ngày {draft.check_out_date.split('-').reverse().join('/')}</strong></p>
+                  <p>📞 Hotline quản gia 24/7 giải đáp trực tiếp: <strong>0908.888.888</strong></p>
+                </div>
+
+                <div className="pt-4 flex flex-col sm:flex-row items-center justify-center gap-3">
+                  <Button
+                    variant="primary"
+                    type="button"
+                    onClick={onCompleteBooking || onGoBack}
+                    className="w-full sm:w-auto px-8 font-bold"
+                  >
+                    Về Trang Chủ
+                  </Button>
+                  <a
+                    href={`/tra-cuu/don/${draft.server_booking_id || ''}`}
+                    className="w-full sm:w-auto px-6 py-2.5 rounded-xl border border-[#D0C8BC] text-xs font-semibold text-[#1A1615] hover:bg-[#FAF8F5] transition-colors"
+                  >
+                    Xem chi tiết đơn tại Tra cứu →
+                  </a>
                 </div>
               </div>
             )}

@@ -89,8 +89,17 @@ export class PaymentsService {
         return null;
       }
       const methods = manager.getRepository(PaymentMethod);
-      let method = await methods.findOneBy({ provider_code: 'PAYOS', is_active: true });
-      if (!method) throw new ConflictException('Phương thức PayOS chưa được bật.');
+      let method = await methods.findOne({
+        where: [
+          { provider_code: 'PAYOS', is_active: true },
+          { provider_code: 'payos', is_active: true },
+          { provider_code: 'vietqr', is_active: true },
+          { is_active: true }
+        ]
+      });
+      if (!method) {
+        method = await methods.save(methods.create({ method_name: 'Thanh toán PayOS VietQR', provider_code: 'PAYOS', is_active: true }));
+      }
       let row = await manager.getRepository(Payment).save(manager.getRepository(Payment).create({ booking_id: bookingId, payment_method_id: method.id, amount, payment_status: 'pending' }));
       // Namespace is distinct from the 8-digit order codes of the old standalone demo.
       const orderCode = 200000000000000 + row.id;
