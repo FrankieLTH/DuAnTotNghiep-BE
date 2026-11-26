@@ -258,7 +258,7 @@ export const RoomBasketList: React.FC<RoomBasketListProps> = ({
           const isCheapest = basket.tags.includes('cheapest');
           const inventoryValid = basket.items.every((item, itemIdx) => {
             const available = variantOptions[itemKey(basket.id, itemIdx)]?.find(option => option.roomTypeId === item.roomTypeId)?.availableCount;
-            return available !== undefined && item.quantity <= available;
+            return available === undefined || item.quantity <= available;
           });
           const canBook = inventoryValid && basket.totalRooms > 0 && basket.totalCapacity >= criteria.adults;
 

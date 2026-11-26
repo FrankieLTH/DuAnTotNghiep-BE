@@ -18,18 +18,18 @@ export class AvailabilityService {
       criteria.stayType
     );
 
-    const params: any[] = [endAt, startAt];
+    const queryParams: any[] = [endAt, startAt, endAt, startAt, endAt, startAt];
     let aptFilter = '';
     if (criteria.apartmentId && Number(criteria.apartmentId) > 0) {
-      aptFilter = 'AND rt.apartment_id = ?';
-      params.push(Number(criteria.apartmentId));
+      aptFilter = 'AND (r.apartment_id = ? OR rt.apartment_id = ?)';
+      queryParams.push(Number(criteria.apartmentId), Number(criteria.apartmentId));
     }
 
     const sql = `
       SELECT
         rt.id AS roomTypeId,
         rt.parent_id AS parentId,
-        rt.apartment_id AS apartmentId,
+        COALESCE(r.apartment_id, rt.apartment_id) AS apartmentId,
         apt.name AS apartmentName,
         rt.name AS name,
         rt.max_occupancy AS maxOccupancy,
@@ -46,7 +46,6 @@ export class AvailabilityService {
         GROUP_CONCAT(DISTINCT CASE WHEN occ_room.room_id IS NULL THEN r.room_id ELSE NULL END) AS roomIdsStr,
         COUNT(DISTINCT CASE WHEN occ_room.room_id IS NULL THEN r.room_id ELSE NULL END) AS availableCount
       FROM room_types rt
-      JOIN APARTMENT apt ON rt.apartment_id = apt.id
       JOIN ROOMS r ON r.room_type_id = rt.id 
         AND r.is_hidden = 0 
         AND r.deleted_at IS NULL
@@ -57,6 +56,7 @@ export class AvailabilityService {
             AND rb.from_at < ? 
             AND (rb.to_at IS NULL OR rb.to_at > ?)
         )
+      JOIN APARTMENT apt ON COALESCE(r.apartment_id, rt.apartment_id) = apt.id
       LEFT JOIN (
         SELECT DISTINCT COALESCE(br.room_id, b.room_id) AS room_id
         FROM BOOKINGS b
@@ -71,25 +71,17 @@ export class AvailabilityService {
       ) occ_room ON occ_room.room_id = r.room_id
       WHERE rt.is_active = 1
         ${aptFilter}
-      GROUP BY rt.id, apt.id
-      HAVING availableCount >= ?
+      GROUP BY rt.id, COALESCE(r.apartment_id, rt.apartment_id), apt.name
+      HAVING availableCount > 0
       ORDER BY basePrice ASC
     `;
-
-    // params order: [blockEndAt, blockStartAt, bookingEndAt, bookingStartAt, bookingEndAt, bookingStartAt, apartmentId?, minRooms]
-    const queryParams: any[] = [endAt, startAt, endAt, startAt, endAt, startAt];
-    if (criteria.apartmentId && Number(criteria.apartmentId) > 0) {
-      queryParams.push(Number(criteria.apartmentId));
-    }
-    const minRooms = Math.max(1, Number(criteria.rooms || 1));
-    queryParams.push(minRooms);
 
     const rows = await this.dataSource.query(sql, queryParams);
 
     return rows.map((r: any) => ({
       roomTypeId: Number(r.roomTypeId),
       parentId: r.parentId !== null && r.parentId !== undefined ? Number(r.parentId) : null,
-      variantKey: `rt-${r.roomTypeId}`,
+      variantKey: `rt-${r.roomTypeId}-${r.apartmentId}`,
       variantLabel: String(r.name),
       roomIds: r.roomIdsStr ? String(r.roomIdsStr).split(',').map(Number) : [],
       apartmentId: Number(r.apartmentId),

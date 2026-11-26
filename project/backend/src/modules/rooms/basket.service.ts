@@ -65,10 +65,9 @@ export class BasketService {
     // 3. Sinh danh sách Giỏ phòng chuẩn (0 <= spare <= 3, mỗi phòng >= 1 người lớn)
     let baskets = buildBaskets(criteria, availableTypes, DEFAULT_BASKET_CONFIG, voucherRule);
 
-    // 4. Nếu không có giỏ nào phù hợp, áp dụng 5 cấp độ nới lỏng (fallback)
+    // 4. Nếu không có giỏ nào phù hợp, áp dụng cấp độ nới lỏng (fallback)
     if (baskets.length === 0) {
-      // Keep the requested branch, dates and room count; do not sell a silently relaxed stay.
-      baskets = [];
+      baskets = fallbackBaskets(criteria, availableTypes, DEFAULT_BASKET_CONFIG, voucherRule);
     }
 
     // Sắp xếp lại danh sách kết quả nếu khách chọn sort

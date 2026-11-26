@@ -39,7 +39,7 @@ export const RoomListPage: React.FC<RoomListPageProps> = ({
   // Bộ lọc dùng chung với trang chủ
   const [currentFilter, setCurrentFilter] = useState<SearchParams>(
     initialSearchParams || {
-      branchId: 1,
+      branchId: 0,
       checkIn: new Date().toISOString().split('T')[0],
       checkOut: new Date(Date.now() + 2 * 86400000).toISOString().split('T')[0],
       adults: 2,
