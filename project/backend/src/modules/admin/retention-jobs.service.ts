@@ -195,7 +195,7 @@ export class RetentionJobsService {
         actor,
         action: 'RUN_PHOTO_CLEANUP_JOB',
         entity_type: 'DATA_RETENTION',
-        entity_id: logEntry.id,
+        entity_id: 0, // retention jobs have no numeric id; the job id is kept in new_value
         new_value: logEntry,
       });
 
@@ -268,7 +268,7 @@ export class RetentionJobsService {
         actor,
         action: 'RUN_ANONYMIZATION_JOB',
         entity_type: 'DATA_RETENTION',
-        entity_id: logEntry.id,
+        entity_id: 0, // retention jobs have no numeric id; the job id is kept in new_value
         new_value: logEntry,
       });
 
