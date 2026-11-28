@@ -101,8 +101,9 @@ export class PaymentsService {
         method = await methods.save(methods.create({ method_name: 'Thanh toán PayOS VietQR', provider_code: 'PAYOS', is_active: true }));
       }
       let row = await manager.getRepository(Payment).save(manager.getRepository(Payment).create({ booking_id: bookingId, payment_method_id: method.id, amount, payment_status: 'pending' }));
-      // Namespace is distinct from the 8-digit order codes of the old standalone demo.
-      const orderCode = 200000000000000 + row.id;
+      // PayOS order codes must stay unique across database resets (payment ids restart at 1),
+      // otherwise PayOS returns a link created by an earlier deployment. Time-based codes avoid it.
+      const orderCode = Date.now() * 1000 + (row.id % 1000);
       row.transaction_id = `PAYOS_${orderCode}`;
       row.provider_data = { order_code: orderCode, hold_until: booking.hold_expires_at.toISOString(), wallet_reserved: walletAmount };
       return manager.getRepository(Payment).save(row);
