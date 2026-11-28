@@ -201,7 +201,7 @@ TTLock nếu làm thật: https://api.sciener.com/v3/keyboardPwd/add, addType=2 
 | T14 | Sửa double prefix api/v1/booking-flow | P3 | qoder-research | done (tsc pass) | booking-workflow.controller.ts |
 | T15 | Nối Dashboard/Vouchers/Staff/AccessCodes vào API có sẵn | P3 | — | todo | admin/screens/* |
 | T16 | Thêm rate_plans + cancellation policy theo mô hình Booking.com (mục 9) | P1 | qoder-research | REVERTED — code đã XÓA khỏi working tree, không còn rate_plans | entities, migration mới, rooms.controller.ts, RoomDetailPage.tsx |
-
+| T17 | Chi tiết loại phòng: số khách/số phòng tối thiểu, kiểm tra tồn kho toàn kỳ, lịch theo số phòng cần và gợi ý giỏ thay thế | P1 | Codex | done | RoomDetailPage.tsx, rooms.controller.ts, availability/basket flow, App.tsx, SearchParams |
 ---
 
 ## 9. ĐỊNH HƯỚNG NGƯỜI DÙNG (chốt 2026-11-18)
@@ -360,3 +360,24 @@ Lưu ý pháp lý: tổng hợp từ nguồn công khai để định hướng �
 - [2026-11-18] Codex -> all: Implemented room creation updates in RoomsScreen and admin-room.service. Add-room now selects a parent room type and sellable variant, asks for floor and quantity, previews sequential room numbers, caps each floor at 20 rooms, and spills remaining quantity to following floors. Backend rejects over-cap plans and serializes same-branch room creation with an APARTMENT row lock; no schema changes. Removed room-group UI controls from RoomsScreen while preserving legacy backend fields/endpoints. Example B101-B103 plus 2 rooms on floor 1 previews B104 and B105. No tests/build run per instruction.
 
 - [2026-11-18] Codex -> all: Tightened room add flow to match clarified room-type-to-variant ownership: each generated room batch carries its selected parent room-type ID alongside the child variant ID, UI variant dropdown remains scoped to that chosen parent, and backend validates the selected child belongs to that parent and branch before creating. No DB changes; no tests/build run.
+
+- [2026-11-27] Codex -> all: Implemented T17: room detail accepts 1-30 guests, derives minimum rooms per variant, checks inventory across the whole stay, and shows alternatives when no variant has enough rooms. Calendar availability now checks the selected variant, requested room count, stay type, and stay duration; dates requiring more than the existing 10-room/order limit are disabled. Alternative search carries the selected branch, dates, guest count, stay type and enables flexible basket room counts (up to 10, preserving capacity/inventory filtering). No DB/schema changes. git diff --check clean; no tests/build run per instruction.
+
+- [2026-11-27] Codex -> all: Follow-up for room-count display: RoomDetailPage now displays a checking state while the count request is pending and a separate retry message on API failure, rather than showing missing response data as zero rooms. Availability is calculated only after a successful response; no tests/build run.
+
+- [2026-11-27] Codex -> all: Resolved persistent room-availability mismatch source: backend is configured for port 3002, while Vite default proxy targeted 3000; active backend process was direct ts-node without watch, so it retained old capacity filtering. Changed both Vite proxy targets to 3002, restarted backend directly with ts-node so latest controller code is loaded, and started Vite at localhost:5173. No database changes.
+
+- [2026-11-28] Codex -> all: Updated ha/26.11 branch/location content to match the Đồi Bông Gòn Vũng Tàu project: backend reference seed and database dumps now use the Hải Đăng, Thiền Môn, and Retreat Triền Núi branches, Vũng Tàu-area addresses, and local contact number; stale Hanoi/Danang/Dalat attractions in LocationsPage were replaced with Vũng Tàu attractions and branch filters; checkout/room-block/service fallbacks were aligned. Added `database/update_vung_tau_locations.sql` and documented it for updating an already imported local DB without schema changes or changing apartment IDs. `git diff --check` clean. No build/tests or live DB update performed.
+- [2026-11-28] Codex -> all: Changed the extra-bed fee from 150,000 to 100,000 VND per room/night using shared constant `EXTRA_BED_PRICE_PER_NIGHT`; detail page, search basket, checkout summary, backend reservation snapshot/total, and service fallback now use that rate. Restarted backend on port 3002 from the ha/26.11 folder via direct ts-node because `nest start --watch` compiles but fails to resolve `dist/main` under the accented OneDrive path. Frontend Vite on 5173 remains active and will HMR. `git diff --check` clean; no tests/build run.
+
+## 2026-11-28 — Hiển thị rõ phụ thu nệm phụ ở trang chi tiết phòng
+- Người dùng muốn khi tích chọn nệm phụ, khách nhìn thấy ngay khoản cộng thêm 100.000đ trước khi tiếp tục đặt.
+- `project/frontend/src/pages/RoomDetailPage.tsx`: nhãn checkbox hiển thị `+100.000đ/đêm/phòng`; khi đã tích và đã chọn ngày, phần tóm tắt hiện riêng phép tính phụ thu (`100.000đ × số phòng × số đêm`) và tổng tiền đã cập nhật.
+- Tổng tiền được cập nhật theo state `extraMattress`; phần tính phí khi tạo booking đã cộng cùng mức phí này vào snapshot/đơn hàng.
+- Chỉ kiểm tra `git diff --check` cho file đã sửa; không chạy test.
+
+## 2026-11-28 — Đổi tên hiển thị chi nhánh Retreat
+- Đổi tên CN2 từ “Retreat Triền Núi” thành “Triền Núi”; tên phòng hiện thành “Studio Cozy (Triền Núi)” để dễ đọc.
+- Đồng bộ dữ liệu seed, dữ liệu mẫu frontend, nhãn lọc địa điểm và `database/update_vung_tau_locations.sql`.
+- Đã cập nhật các dòng apartment/room_types hiện có trong database local Docker `ha2611-mysql-1` / `duanmoi`; 8 loại phòng của apartment 3 hiện dùng hậu tố “(Triền Núi)”. Không thay đổi schema hay số bảng.
+- Kiểm tra định dạng bằng `git diff --check`; không chạy test.

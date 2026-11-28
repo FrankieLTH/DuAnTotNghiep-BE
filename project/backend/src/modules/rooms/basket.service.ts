@@ -45,6 +45,7 @@ export class BasketService {
       criteria.adults,
       criteria.children,
       criteria.rooms,
+      criteria.autoRooms ? 'auto' : 'fixed',
       criteria.voucherCode || '',
       criteria.sort || 'default',
     ].join('_');
@@ -63,10 +64,39 @@ export class BasketService {
     }
 
     // 3. Sinh danh sách Giỏ phòng chuẩn (0 <= spare <= 3, mỗi phòng >= 1 người lớn)
-    let baskets = buildBaskets(criteria, availableTypes, DEFAULT_BASKET_CONFIG, voucherRule);
+    let baskets: Basket[];
+    if (criteria.autoRooms) {
+      const flexible: Basket[] = [];
+      const maxRooms = Math.min(10, criteria.adults);
+      for (let roomCount = 1; roomCount <= maxRooms; roomCount++) {
+        flexible.push(...buildBaskets({ ...criteria, rooms: roomCount }, availableTypes, DEFAULT_BASKET_CONFIG, voucherRule));
+      }
+      if (flexible.length === 0) {
+        const widerFit = { ...DEFAULT_BASKET_CONFIG, maxSpare: 6 };
+        for (let roomCount = 1; roomCount <= maxRooms; roomCount++) {
+          flexible.push(...buildBaskets({ ...criteria, rooms: roomCount }, availableTypes, widerFit, voucherRule));
+        }
+      }
+      const unique = new Map<string, Basket>();
+      for (const basket of flexible) {
+        const key = `${basket.apartmentId || 0}|${basket.items.map(item => `${item.variantKey || item.roomTypeId}x${item.quantity}`).sort().join('|')}`;
+        if (!unique.has(key)) unique.set(key, { ...basket, id: `basket_auto_${unique.size + 1}` });
+      }
+      baskets = [...unique.values()];
+      baskets.sort((a, b) => {
+        if (criteria.sort === 'price_asc') return a.totalPrice - b.totalPrice;
+        if (criteria.sort === 'price_desc') return b.totalPrice - a.totalPrice;
+        if (a.spare !== b.spare) return a.spare - b.spare;
+        if (a.totalRooms !== b.totalRooms) return a.totalRooms - b.totalRooms;
+        return a.totalPrice - b.totalPrice;
+      });
+      baskets = baskets.slice(0, DEFAULT_BASKET_CONFIG.maxBaskets);
+    } else {
+      baskets = buildBaskets(criteria, availableTypes, DEFAULT_BASKET_CONFIG, voucherRule);
+    }
 
     // 4. Nếu không có giỏ nào phù hợp, áp dụng cấp độ nới lỏng (fallback)
-    if (baskets.length === 0) {
+    if (baskets.length === 0 && !criteria.autoRooms) {
       baskets = fallbackBaskets(criteria, availableTypes, DEFAULT_BASKET_CONFIG, voucherRule);
     }
 

@@ -115,7 +115,7 @@ export const RoomListPage: React.FC<RoomListPageProps> = ({
     },
     {
       id: 5,
-      title: 'CN2: Retreat',
+      title: 'CN2: Triền Núi',
       image: 'https://images.unsplash.com/photo-1590490360182-c33d57733427?auto=format&fit=crop&w=400&q=80',
     },
   ];

@@ -1,4 +1,5 @@
 import { computeStayWindow } from '@shared/recommendation';
+import { EXTRA_BED_PRICE_PER_NIGHT } from '@shared/constants';
 import React, { useState, useEffect } from 'react';
 import { Button } from '../components/ui/Button';
 import { Badge } from '../components/ui/Badge';
@@ -26,6 +27,7 @@ interface RoomDetailPageProps {
   searchParams?: SearchParams;
   sourceBasket?: Basket | null;
   onGoBack: () => void;
+  onSearchAlternatives?: (params: SearchParams) => void;
   onProceedToCheckout: (bookingDetails: any) => void;
 }
 
@@ -34,6 +36,7 @@ export const RoomDetailPage: React.FC<RoomDetailPageProps> = ({
   searchParams,
   sourceBasket,
   onGoBack,
+  onSearchAlternatives,
   onProceedToCheckout,
 }) => {
   const [room, setRoom] = useState<RoomItem | null>(null);
@@ -41,7 +44,7 @@ export const RoomDetailPage: React.FC<RoomDetailPageProps> = ({
   const [services, setServices] = useState<ServiceItem[]>([]);
   const [vouchers, setVouchers] = useState<VoucherItem[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
-  const [availability, setAvailability] = useState<'checking' | 'available' | 'unavailable' | 'invalid'>('checking');
+  const [availability, setAvailability] = useState<'checking' | 'available' | 'unavailable' | 'invalid' | 'error'>('checking');
   const [options, setOptions] = useState<RoomTypeOption[]>([]);
   const [variants,setVariants] = useState<RoomVariant[]>([]);
   const [calendar,setCalendar] = useState<VariantCalendar|null>(null);
@@ -66,9 +69,10 @@ export const RoomDetailPage: React.FC<RoomDetailPageProps> = ({
 
   useEffect(()=>{
     if(!checkInDate||!checkOutDate)return;
+    if(searchParams?.stayType==='daytime'){setCalendarNights(1);return;}
     const days=Math.round((Date.parse(`${checkOutDate}T00:00:00Z`)-Date.parse(`${checkInDate}T00:00:00Z`))/86400000);
     if(days>=1&&days<=30)setCalendarNights(days);
-  },[checkInDate,checkOutDate]);
+  },[checkInDate,checkOutDate,searchParams?.stayType]);
 
   const [selectedServiceIds] = useState<Record<number, boolean>>({});
   const [appliedVoucherCode] = useState('');
@@ -85,7 +89,7 @@ export const RoomDetailPage: React.FC<RoomDetailPageProps> = ({
         getRoomVariants(rData.room_type_id).then(setVariants).catch(()=>setVariants([]));
 
         setActivePhotoIdx(0);
-        setGuestCount(searchParams?.adults || Math.min(2, rData.max_occupancy));
+        if (!searchParams) setGuestCount(2);
       } catch (err) {
         console.error('Error fetching room detail:', err);
       } finally {
@@ -99,37 +103,35 @@ export const RoomDetailPage: React.FC<RoomDetailPageProps> = ({
     if (!room) return;
     const todayLocal = new Date();
     const todayText = `${todayLocal.getFullYear()}-${String(todayLocal.getMonth() + 1).padStart(2, '0')}-${String(todayLocal.getDate()).padStart(2, '0')}`;
-    if (!checkInDate || !checkOutDate || checkInDate < todayText || checkOutDate <= checkInDate || guestCount < 1 || guestCount > Math.max(room.max_occupancy,...variants.map(v=>v.maxOccupancy))) {
+    if (!checkInDate || !checkOutDate || checkInDate < todayText || checkOutDate <= checkInDate || guestCount < 1 || guestCount > 30) {
+      setOptions([]);
       setAvailability('invalid'); return;
     }
     let active = true;
+    setOptions([]);
     setAvailability('checking');
-    getRoomTypeOptions(room.room_type_id, checkInDate, checkOutDate, Math.max(1, guestCount - (searchParams?.children || 0)), { stayType: searchParams?.stayType, children: searchParams?.children || 0, rooms: searchParams?.rooms || 1 })
+    getRoomTypeOptions(room.room_type_id, checkInDate, checkOutDate, guestCount, { stayType: searchParams?.stayType, children: 0, rooms: 1 })
       .then(rows => {
         if (active) {
           setOptions(rows);
+          const hasReservableVariant = rows.some(row => {
+            const needed = Math.max(1, Math.ceil(guestCount / Math.max(1, row.maxOccupancy || 1)));
+            return needed <= 10 && row.availableCount >= needed;
+          });
           if (rows.length > 0) {
             const hasMatch = rows.some(row => row.variantKey === selectedOptionKey);
             if (!hasMatch) {
               setSelectedOptionKey(rows[0].variantKey);
             }
-            setAvailability('available');
+            setAvailability(hasReservableVariant ? 'available' : 'unavailable');
           } else {
             setAvailability('unavailable');
           }
         }
       })
-      .catch(() => { if (active) setAvailability('unavailable'); });
+      .catch(() => { if (active) setAvailability('error'); });
     return () => { active = false; };
   }, [room, checkInDate, checkOutDate, guestCount, searchParams?.stayType, searchParams?.children, searchParams?.rooms, selectedOptionKey, variants]);
-
-  useEffect(()=>{
-    if(!room)return;
-    let active=true;
-    setCalendar(null);
-    getVariantCalendar(Number(selectedOptionKey)||room.room_type_id,calendarMonth,1).then(value=>{if(active)setCalendar(value);}).catch(()=>{if(active)setCalendar(null);});
-    return ()=>{active=false;};
-  },[room,selectedOptionKey,calendarMonth,calendarNights]);
 
   useEffect(()=>{
     const selected=variants.find(v=>String(v.roomTypeId)===selectedOptionKey);
@@ -147,15 +149,32 @@ export const RoomDetailPage: React.FC<RoomDetailPageProps> = ({
   const nights = stayWindow.nightsOrDays;
 
   const chosenOption = options.find(option => option.variantKey === selectedOptionKey) || options[0];
-  const selectedVariant = variants.find(v=>String(v.roomTypeId)===selectedOptionKey);
+  const selectedVariant = variants.find(v=>v.roomTypeId===chosenOption?.roomTypeId) || variants.find(v=>String(v.roomTypeId)===selectedOptionKey);
+  const requiredRoomCount = (capacity: number) => Math.max(1, Math.ceil(guestCount / Math.max(1, capacity)));
+  const hasFeasibleVariant = variants.some(variant => {
+    const offer = options.find(option => option.roomTypeId === variant.roomTypeId);
+    const needed = requiredRoomCount(variant.maxOccupancy);
+    return needed <= 10 && (offer?.availableCount || 0) >= needed;
+  });
+  const exceedsRoomLimitForAllVariants = variants.length > 0 && variants.every(variant => requiredRoomCount(variant.maxOccupancy) > 10);
+  const calendarVariantId = chosenOption?.roomTypeId || selectedVariant?.roomTypeId || room?.room_type_id || 0;
+  const calendarCapacity = variants.find(v => v.roomTypeId === calendarVariantId)?.maxOccupancy || room?.max_occupancy || 1;
+  useEffect(()=>{
+    if(!room)return;
+    let active=true;
+    setCalendar(null);
+    getVariantCalendar(calendarVariantId,calendarMonth,calendarNights,requiredRoomCount(calendarCapacity),searchParams?.stayType||'fullday').then(value=>{if(active)setCalendar(value);}).catch(()=>{if(active)setCalendar(null);});
+    return ()=>{active=false;};
+  },[room,calendarVariantId,calendarMonth,calendarNights,guestCount,calendarCapacity,searchParams?.stayType]);
   const displayRoom=variantRoom?.room_type_id===selectedVariant?.roomTypeId?variantRoom:room;
   const listedPricePerNight = selectedVariant?.basePrice ?? Number(room?.base_type_price ?? room?.base_price ?? 0);
   const basePricePerNight = chosenOption ? chosenOption.basePricePerNight : 0;
   const roomPriceTotal = chosenOption?.totalPrice || 0;
 
-  const servicesTotal = extraMattress ? 150000 * nights : 0;
+  const selectedRoomCount = requiredRoomCount(selectedVariant?.maxOccupancy || room?.max_occupancy || 1);
+  const servicesTotal = extraMattress ? EXTRA_BED_PRICE_PER_NIGHT * nights * selectedRoomCount : 0;
   const discountAmount = 0;
-  const totalPrice = roomPriceTotal + servicesTotal;
+  const totalPrice = roomPriceTotal * selectedRoomCount + servicesTotal;
 
   const handleProceedWithBasket = () => {
     if (!sourceBasket || !room) return;
@@ -264,13 +283,16 @@ export const RoomDetailPage: React.FC<RoomDetailPageProps> = ({
     const option = optionOverride || chosenOption;
     const variant = optionOverride ? variants.find(v => v.roomTypeId === optionOverride.roomTypeId) : selectedVariant;
     if (!room || !option) return;
-    const effectiveRoomIds = option.roomIds?.length ? option.roomIds : [room.id];
+    const capacity = variant?.maxOccupancy || room.max_occupancy;
+    const roomCount = requiredRoomCount(capacity);
+    if ((option.availableCount || 0) < roomCount || (option.roomIds || []).length < roomCount) return;
+    const effectiveRoomIds = (option.roomIds || []).slice(0, roomCount);
     const nightly = option.basePricePerNight;
     const roomTotal = option.totalPrice;
     const stayNights = option.nights;
     const hasExtraMattress = extraMattress;
-    const extraMattressFee = hasExtraMattress ? 150000 * stayNights : 0;
-    const finalRoomPrice = roomTotal + extraMattressFee;
+    const extraMattressFee = hasExtraMattress ? EXTRA_BED_PRICE_PER_NIGHT * stayNights * roomCount : 0;
+    const finalRoomPrice = roomTotal * roomCount + extraMattressFee;
 
     const draft: BookingDraft = {
       id: `draft_${Date.now()}`,
@@ -281,20 +303,20 @@ export const RoomDetailPage: React.FC<RoomDetailPageProps> = ({
       room_type_id: option.roomTypeId,
       room_type_name: option.name,
       room_type_image: displayRoom?.images[0] || room.images[0] || '',
-      num_rooms: 1,
+      num_rooms: roomCount,
       booking_rooms: [
         {
           room_type_id: option.roomTypeId,
-          room_ids:[effectiveRoomIds[0] || room.id],features:[],feature_price_per_night:0,
+          room_ids:effectiveRoomIds,features:[],feature_price_per_night:0,
           room_type_name: option.name,
           room_type_image: displayRoom?.images[0] || room.images[0] || '',
-          count: 1,
+          count: roomCount,
           price: nightly,
-          max_occupancy: (variant?.maxOccupancy||room.max_occupancy) + (hasExtraMattress ? 1 : 0),
+          max_occupancy: capacity + (hasExtraMattress ? 1 : 0),
           has_extra_bed: hasExtraMattress,
         },
       ],
-      total_capacity: (variant?.maxOccupancy||room.max_occupancy) + (hasExtraMattress ? 1 : 0),
+      total_capacity: (capacity + (hasExtraMattress ? 1 : 0)) * roomCount,
       has_extra_bed: hasExtraMattress,
       extra_bed_fee: extraMattressFee,
       stay_type: (searchParams?.stayType || 'fullday') as BookingDraft['stay_type'],
@@ -303,7 +325,7 @@ export const RoomDetailPage: React.FC<RoomDetailPageProps> = ({
       nights: stayNights,
       num_adults: guestCount,
       num_children: 0,
-      children_ages: searchParams?.childrenAges || [],
+      children_ages: [],
       price_breakdown: [
         {
           date: checkInDate,
@@ -314,7 +336,7 @@ export const RoomDetailPage: React.FC<RoomDetailPageProps> = ({
           finalPricePerRoom: nightly,
         },
       ],
-      room_subtotal: roomTotal,
+      room_subtotal: roomTotal * roomCount,
       extra_fee_total: extraMattressFee,
       service_total: 0,
       discount_amount: discountAmount,
@@ -329,21 +351,19 @@ export const RoomDetailPage: React.FC<RoomDetailPageProps> = ({
         email_verified: false,
         consent_data_protection: false,
       },
-      guests: [
-        {
-          id: 'slot-1',
-          slot_index: 1,
-          guest_type: 'adult',
-          is_booker: true,
-          is_foreigner: false,
-          full_name: '',
-          date_of_birth: '',
-          id_type: 'cccd',
-          id_number: '',
-          slot_status: 'empty',
-          retry_count: 0,
-        },
-      ],
+      guests: Array.from({ length: guestCount }, (_, index) => ({
+        id: `slot-${index + 1}`,
+        slot_index: index + 1,
+        guest_type: 'adult' as const,
+        is_booker: index === 0,
+        is_foreigner: false,
+        full_name: '',
+        date_of_birth: '',
+        id_type: 'cccd' as const,
+        id_number: '',
+        slot_status: 'empty' as const,
+        retry_count: 0,
+      })),
     };
 
     onProceedToCheckout(draft);
@@ -377,7 +397,7 @@ export const RoomDetailPage: React.FC<RoomDetailPageProps> = ({
   ];
 
   const statusBadgeVariant = availability === 'available' ? 'feature-green' : 'warning';
-  const statusLabel = availability === 'available' ? 'Có phương án còn trống theo ngày đã chọn' : availability === 'invalid' ? 'Khoảng ngày hoặc số khách không hợp lệ (ngày nhận phải từ hôm nay). Chọn ngày xanh trên lịch.' : availability === 'unavailable' ? 'Hết phòng trong khoảng ngày đã chọn. Xem ngày còn trống gợi ý bên dưới.' : 'Chọn ngày để xem phòng trống';
+  const statusLabel = availability === 'available' ? 'Có phương án còn trống theo ngày đã chọn' : availability === 'invalid' ? 'Khoảng ngày hoặc số khách không hợp lệ (ngày nhận phải từ hôm nay). Chọn ngày xanh trên lịch.' : availability === 'unavailable' ? 'Không đủ phòng trống cho lựa chọn hiện tại.' : availability === 'checking' ? 'Đang kiểm tra số phòng trống…' : availability === 'error' ? 'Chưa tải được tình trạng phòng. Vui lòng thử lại.' : 'Chọn ngày để xem phòng trống';
 
   return (
     <div className="bg-[#FAF7F2] min-h-screen pb-16 font-sans">
@@ -557,7 +577,7 @@ export const RoomDetailPage: React.FC<RoomDetailPageProps> = ({
                 <div className="flex items-center gap-2">
                   <label className="text-xs font-semibold text-[#3E2C23]">Số khách</label>
                   <select value={guestCount} onChange={(e) => setGuestCount(Number(e.target.value))} className="flex-1 bg-[#FAF7F2] border border-[#E8DFD1] rounded-xl px-3 py-2 text-xs">
-                    {Array.from({ length: Math.max(room.max_occupancy, ...variants.map(v => v.maxOccupancy)) }, (_, i) => i + 1).map(n => (<option key={n} value={n}>{n} khách</option>))}
+                    {Array.from({ length: 30 }, (_, i) => i + 1).map(n => (<option key={n} value={n}>{n} khách</option>))}
                   </select>
                 </div>
                 {(!checkInDate || !checkOutDate) && <p className="text-xs bg-[#FFF4E8] border border-[#E8C9A8] text-[#8A5A2B] rounded-lg px-3 py-2">Chọn ngày nhận rồi ngày trả trên lịch để xem giá trọn kỳ và phòng trống.</p>}
@@ -587,8 +607,11 @@ export const RoomDetailPage: React.FC<RoomDetailPageProps> = ({
                               const isPast = day.date < todayStr;
                               const inRange = checkInDate && checkOutDate && day.date >= checkInDate && day.date <= checkOutDate;
                               const isEdge = day.date === checkInDate || day.date === checkOutDate;
-                              const disabled = day.status !== 'available' || isPast;
-                              const title = isPast ? 'Ngày đã qua' : disabled ? 'Hết phòng' : `Còn ${day.availableCount} phòng`;
+                              const choosingCheckout = !!rangeAnchor && day.date > rangeAnchor;
+                              const roomsNeededForCalendar = requiredRoomCount(calendarCapacity);
+                              const exceedsOrderRoomLimit = roomsNeededForCalendar > 10;
+                              const disabled = isPast || exceedsOrderRoomLimit || (!choosingCheckout && day.status !== 'available');
+                              const title = isPast ? 'Ngày đã qua' : exceedsOrderRoomLimit ? `Cần ${roomsNeededForCalendar} phòng, vượt giới hạn 10 phòng/đơn` : disabled ? `Không đủ ${roomsNeededForCalendar} phòng trong ${calendarNights} đêm` : `Còn ${day.availableCount} phòng`;
 
                               return (
                                 <button
@@ -633,16 +656,20 @@ export const RoomDetailPage: React.FC<RoomDetailPageProps> = ({
               {/* Offer rows: whole-stay price + conditions + scarcity + per-row Reserve (Booking.com room table) */}
               <div className="space-y-3 border-t pt-4">
                 <h3 className="font-semibold text-sm">Chọn hạng phòng &amp; giá trọn kỳ</h3>
-                {checkInDate && checkOutDate && variants.every(v => !options.find(o => o.roomTypeId === v.roomTypeId)?.roomIds?.length) && (
+                {availability === 'error' && <p className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs font-medium text-amber-800">Không tải được tình trạng phòng trống. Hãy thử tải lại hoặc chọn lại ngày.</p>}
+                {checkInDate && checkOutDate && variants.length > 0 && !hasFeasibleVariant && availability === 'unavailable' && (
                   <div className="p-3 bg-red-50 border border-red-200 rounded-xl text-xs text-red-700 font-medium">
-                    ⚠️ Rất tiếc, các hạng phòng này đã kín phòng trong khoảng thời gian bạn chọn ({checkInDate.split('-').reverse().join('/')} - {checkOutDate.split('-').reverse().join('/')}). Vui lòng chọn ngày khác trên lịch.
+                    ⚠️ {exceedsRoomLimitForAllVariants ? `Với ${guestCount} khách, số phòng tối thiểu vượt giới hạn 10 phòng mỗi đơn.` : `Không đủ phòng trống cho ${guestCount} khách trong khoảng ${checkInDate.split('-').reverse().join('/')} - ${checkOutDate.split('-').reverse().join('/')}.`}
+                    {onSearchAlternatives && !exceedsRoomLimitForAllVariants && <button type="button" onClick={() => onSearchAlternatives({ branchId: room.apartment_id, checkIn: checkInDate, checkOut: checkOutDate, adults: guestCount, children: 0, childrenAges: [], rooms: 1, stayType: searchParams?.stayType || 'fullday', autoRooms: true })} className="mt-2 block rounded-lg bg-[#C85A32] px-3 py-2 font-bold text-white hover:bg-[#A8481F]">Hiển thị loại phòng phù hợp</button>}
                   </div>
                 )}
                 {variants.map(variant => {
                   const offer = options.find(o => o.roomTypeId === variant.roomTypeId);
-                  const canReserve = !!offer?.roomIds?.length && (offer.availableCount || 0) > 0;
+                  const roomsNeeded = requiredRoomCount(variant.maxOccupancy);
+                  const roomsAvailable = offer?.availableCount || 0;
+                  const canReserve = availability === 'available' && roomsNeeded <= 10 && !!offer?.roomIds?.length && roomsAvailable >= roomsNeeded;
                   return (
-                    <div key={variant.roomTypeId} className={`border rounded-xl p-3 space-y-2 ${selectedOptionKey === String(variant.roomTypeId) ? 'border-[#C85A32] ring-1 ring-[#C85A32]' : 'border-[#E8DFD1]'} ${!checkInDate || !checkOutDate ? 'opacity-70' : ''}`}>
+                    <div key={variant.roomTypeId} className={`border rounded-xl p-3 space-y-2 ${chosenOption?.roomTypeId === variant.roomTypeId ? 'border-[#C85A32] ring-1 ring-[#C85A32]' : 'border-[#E8DFD1]'} ${!checkInDate || !checkOutDate ? 'opacity-70' : ''}`}>
                       <div className="flex items-start justify-between gap-2">
                         <div>
                           <strong className="text-sm text-[#3E2C23]">{variant.variantLabel}</strong>
@@ -651,19 +678,31 @@ export const RoomDetailPage: React.FC<RoomDetailPageProps> = ({
                           <span className="inline-block mt-1 text-[10px] px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">Hủy trước nhận phòng · hoàn 50% (duyệt)</span>
                         </div>
                         <div className="text-right">
-                          {offer && canReserve ? (<><span className="block text-lg font-serif font-bold text-[#C85A32]">{offer.totalPrice.toLocaleString('vi-VN')}đ</span><span className="block text-[10px] text-[#795341]">{offer.nights} đêm · {offer.basePricePerNight.toLocaleString('vi-VN')}đ/đêm</span></>) : (<span className="block text-xs font-semibold text-red-600">{!checkInDate || !checkOutDate ? 'Chọn ngày để xem giá' : 'Hết phòng khoảng ngày này'}</span>)}
+                          {availability === 'checking' ? <span className="block text-xs font-semibold text-stone-500">Đang kiểm tra tồn phòng…</span> : availability === 'error' ? <span className="block text-xs font-semibold text-amber-700">Chưa tải được tồn phòng</span> : offer && checkInDate && checkOutDate ? (<><span className="block text-lg font-serif font-bold text-[#C85A32]">{(offer.totalPrice * roomsNeeded + (extraMattress ? EXTRA_BED_PRICE_PER_NIGHT * offer.nights * roomsNeeded : 0)).toLocaleString('vi-VN')}đ</span><span className="block text-[10px] text-[#795341]">{roomsNeeded} phòng · {offer.nights} đêm</span></>) : (<span className="block text-xs font-semibold text-stone-500">Chọn ngày để xem giá</span>)}
                         </div>
                       </div>
                       <div className="flex items-center justify-between gap-2">
-                        <span className="text-[11px] text-[#B4532A] font-semibold">{offer && canReserve ? (offer.availableCount === 1 ? 'Chỉ còn 1 phòng ở mức giá này' : `Còn ${offer.availableCount} phòng`) : <span className="text-red-500 font-normal">Không khả dụng</span>}</span>
-                        <button type="button" disabled={!canReserve} onClick={() => { setSelectedOptionKey(String(variant.roomTypeId)); handleProceedSingleRoom(offer); }} className={`px-4 py-2 rounded-xl text-xs font-bold transition-colors ${canReserve ? 'bg-[#C85A32] text-white hover:bg-[#A8481F] cursor-pointer' : 'bg-stone-200 text-stone-400 cursor-not-allowed'}`}>Đặt</button>
+                        <span className="text-[11px] text-[#B4532A] font-semibold">{availability === 'checking' ? 'Đang kiểm tra tồn phòng…' : availability === 'error' ? <span className="text-amber-700 font-normal">Không tải được tồn phòng</span> : offer && canReserve ? `Cần ${roomsNeeded} phòng · còn ${roomsAvailable} phòng` : <span className="text-red-500 font-normal">Không đủ phòng trống</span>}</span>
+                        <button type="button" disabled={!canReserve} onClick={() => { setSelectedOptionKey(String(variant.roomTypeId)); handleProceedSingleRoom(offer); }} className={`px-4 py-2 rounded-xl text-xs font-bold transition-colors ${canReserve ? 'bg-[#C85A32] text-white hover:bg-[#A8481F] cursor-pointer' : 'bg-stone-200 text-stone-400 cursor-not-allowed'}`}>Đặt {roomsNeeded} phòng</button>
                       </div>
                     </div>
                   );
                 })}
               </div>
 
-              <label className="flex items-center gap-2 text-sm border-t pt-3"><input type="checkbox" checked={extraMattress} onChange={e => setExtraMattress(e.target.checked)} /> Nệm phụ</label>
+              <label className="flex items-center gap-2 text-sm border-t pt-3">
+                <input type="checkbox" checked={extraMattress} onChange={e => setExtraMattress(e.target.checked)} />
+                <span>Nệm phụ <span className="text-[#795341]">(+{EXTRA_BED_PRICE_PER_NIGHT.toLocaleString('vi-VN')}đ/đêm/phòng)</span></span>
+              </label>
+              {chosenOption && checkInDate && checkOutDate && (
+                <div className="space-y-1 rounded-xl border border-[#E8DFD1] bg-[#FAF7F2] px-3 py-2.5">
+                  {extraMattress && <div className="flex items-center justify-between gap-3 text-xs text-[#795341]"><span>Phụ thu nệm phụ ({EXTRA_BED_PRICE_PER_NIGHT.toLocaleString('vi-VN')}đ × {selectedRoomCount} phòng × {chosenOption.nights} đêm)</span><strong>+{servicesTotal.toLocaleString('vi-VN')}đ</strong></div>}
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="text-xs font-semibold text-[#5C534B]">Tổng tiền · {selectedRoomCount} phòng · {chosenOption.nights} đêm</span>
+                    <strong className="text-base font-serif text-[#C85A32]">{totalPrice.toLocaleString('vi-VN')}đ</strong>
+                  </div>
+                </div>
+              )}
 
               {sourceBasket && (() => {
                 const isBasketFeasible = sourceBasket.items.every(it => {

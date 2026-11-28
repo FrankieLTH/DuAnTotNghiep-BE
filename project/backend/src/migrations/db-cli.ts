@@ -38,7 +38,7 @@ async function handleMigrate() {
 async function handleSeed() {
   console.log('\n=== CHẠY DB SEED (IDEMPOTENT) ===');
   const seed = generateSeedData();
-  console.log(`- Chi nhánh: ${seed.branches.length} chi nhánh (Ba Đình, Cầu Giấy, Hoàn Kiếm)`);
+  console.log(`- Chi nhánh: ${seed.branches.length} chi nhánh tại Vũng Tàu (Hải Đăng, Thiền Môn, Triền Núi)`);
   console.log(`- Loại phòng: ${seed.roomTypes.length} loại phòng (4 loại / chi nhánh)`);
   console.log(`- Phòng thực tế: ${seed.rooms.length} phòng (3 phòng / loại)`);
   console.log(`- Khóa điện tử: ${seed.locks.length} khóa TTLock`);

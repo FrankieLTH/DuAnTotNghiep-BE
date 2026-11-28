@@ -10,6 +10,7 @@ import {
 } from '../services/dataService';
 import { customerService, customerError, type CustomerProfile } from '../services/customerService';
 import { getCustomerToken } from '../services/customerSession';
+import { EXTRA_BED_PRICE_PER_NIGHT } from '@shared/constants';
 
 interface CheckoutPageProps {
   bookingData?: BookingDraft | any;
@@ -44,8 +45,8 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({
     id: 'draft_default',
     booking_code: 'BK-202611-8942',
     apartment_id: 1,
-    apartment_name: 'Sunshine Villa Phố Cổ',
-    apartment_address: '123 Phố Hàng Bạc, Hoàn Kiếm, Hà Nội',
+    apartment_name: 'Đồi Bông Gòn - CN1: Hải Đăng',
+    apartment_address: 'Đường Hải Đăng, phường Vũng Tàu, TP. Hồ Chí Minh',
     room_type_id: 1,
     room_type_name: 'Studio Cozy Standard',
     room_type_image:
@@ -1593,7 +1594,7 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({
                           {br.count} phòng • Sức chứa {br.max_occupancy} khách{br.has_extra_bed ? ' · Có nệm phụ' : ''}
                         </span>
                         <span className="text-[11px] text-[#9E472A] font-semibold block">
-                          {Math.round(br.price * br.count * draft.nights + (br.has_extra_bed ? 150000 * draft.nights : 0)).toLocaleString('vi-VN')}đ
+                          {Math.round(br.price * br.count * draft.nights + (br.has_extra_bed ? EXTRA_BED_PRICE_PER_NIGHT * draft.nights : 0)).toLocaleString('vi-VN')}đ
                         </span>
                       </div>
                     </div>

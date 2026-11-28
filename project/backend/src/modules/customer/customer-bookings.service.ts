@@ -10,6 +10,7 @@ import { BookingStatus, BookingType, GuestType, GuestSlotStatus } from '@shared/
 import { CustomerBookingQuery, GuestBookingDto, CompleteCheckoutDto, CheckoutBookerDto, SaveGuestDraftDto } from './customer.dto';
 import { computeStayWindow } from '@shared/recommendation';
 import { customerNetPaid } from './customer-finance';
+import { EXTRA_BED_PRICE_PER_NIGHT } from '@shared/constants';
 
 @Injectable()
 export class CustomerBookingsService {
@@ -246,7 +247,7 @@ export class CustomerBookingsService {
         }
       }
       let total=quoted.reduce((sum,q)=>sum+q.snapshot.room_total,0);
-      const extraBedTotal = extraBedCount * 150000 * window.nightsOrDays;
+      const extraBedTotal = extraBedCount * EXTRA_BED_PRICE_PER_NIGHT * window.nightsOrDays;
       total += extraBedTotal;
       const customer = await manager.getRepository(Customer).findOneBy({ email: data.email.trim().toLowerCase(), is_blocked: false, is_hidden: false });
       if (!customer) throw new BadRequestException('Vui lòng xác thực email người đặt trước.');
@@ -258,7 +259,7 @@ export class CustomerBookingsService {
         room_type_id: types[0]?.id || null,
         stay_type: stayType, start_at: start, end_at: end, booked_start_time: start, booked_end_time: end,
         adults: data.adults, children: data.children, booking_status: draft ? BookingStatus.DRAFT : BookingStatus.PENDING_PAYMENT,
-        checkout_data: { extras: { extra_beds_by_type: Object.fromEntries(extraBeds), extra_bed_nightly_rate: 150000, extra_bed_total: extraBedTotal }, booker: { full_name: data.full_name, email: data.email.trim().toLowerCase(), phone: data.phone || '', is_staying: data.is_staying !== false, consent_data_protection: true } },
+        checkout_data: { extras: { extra_beds_by_type: Object.fromEntries(extraBeds), extra_bed_nightly_rate: EXTRA_BED_PRICE_PER_NIGHT, extra_bed_total: extraBedTotal }, booker: { full_name: data.full_name, email: data.email.trim().toLowerCase(), phone: data.phone || '', is_staying: data.is_staying !== false, consent_data_protection: true } },
         total_price: Math.round(total), hold_expires_at: new Date(Math.floor((Date.now() + 15 * 60000) / 1000) * 1000),
       });
       let adultsLeft=data.adults;

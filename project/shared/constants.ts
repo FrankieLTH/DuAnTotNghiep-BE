@@ -17,6 +17,9 @@ export const EXTENDED_HOLD_MINUTES = 15;
 /** Ngưỡng tuổi trẻ em: dưới 10 tuổi tính theo ngày check-in */
 export const CHILD_AGE_THRESHOLD = 10;
 
+/** Giá nệm phụ cộng theo phòng cho mỗi đêm lưu trú */
+export const EXTRA_BED_PRICE_PER_NIGHT = 100_000;
+
 /** Thời gian hết hạn của Signed URL xem ảnh CCCD riêng tư: 120 giây (2 phút) */
 export const SIGNED_DOC_URL_TTL_SECONDS = 120;
 

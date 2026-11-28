@@ -7,6 +7,7 @@ import {
   getRoomBaskets,
 } from '../../services/dataService';
 import { calculateNights } from '@shared/helpers/pricing';
+import { EXTRA_BED_PRICE_PER_NIGHT } from '@shared/constants';
 
 interface RoomBasketListProps {
   criteria: SearchCriteria;
@@ -28,7 +29,7 @@ export const RoomBasketList: React.FC<RoomBasketListProps> = ({
   const [variantOptions, setVariantOptions] = useState<Record<string, RoomTypeOption[]>>({});
 
   const nights = criteria.stayType === 'daytime' ? 1 : calculateNights(criteria.checkIn, criteria.checkOut);
-  const EXTRA_MATTRESS_NIGHTLY_RATE = 150000;
+  const EXTRA_MATTRESS_NIGHTLY_RATE = EXTRA_BED_PRICE_PER_NIGHT;
 
   const toggleExtraMattress = (basketId: string, itemIdx: number) => {
     const key = `${basketId}_item_${itemIdx}`;
@@ -205,7 +206,9 @@ export const RoomBasketList: React.FC<RoomBasketListProps> = ({
           {error || 'Không tìm thấy giỏ phòng phù hợp chính xác'}
         </h3>
         <p className="text-xs text-[#736B63] max-w-md mx-auto leading-relaxed">
-          Hiện tại không có tổ hợp {criteria.rooms} phòng nào vừa khít cho đoàn {criteria.adults} người lớn trong khung giờ này.
+          {criteria.autoRooms
+            ? `Hiện chưa có tổ hợp phòng đủ sức chứa và còn trống cho ${criteria.adults} người trong khoảng ngày đã chọn.`
+            : `Hiện tại không có tổ hợp ${criteria.rooms} phòng nào vừa khít cho đoàn ${criteria.adults} người lớn trong khung giờ này.`}
           Bạn có thể điều chỉnh ngày hoặc số khách rồi tìm lại.
         </p>
       </div>
@@ -221,7 +224,7 @@ export const RoomBasketList: React.FC<RoomBasketListProps> = ({
             Gợi ý {baskets.length} giỏ phòng tối ưu
           </span>
           <span className="text-xs text-[#736B63]">
-            (Đoàn {criteria.adults} người lớn · {criteria.children} trẻ em · {criteria.rooms} phòng)
+            (Đoàn {criteria.adults} người lớn · {criteria.children} trẻ em · {criteria.autoRooms ? 'tự chọn số phòng theo sức chứa' : `${criteria.rooms} phòng`})
           </span>
         </div>
 

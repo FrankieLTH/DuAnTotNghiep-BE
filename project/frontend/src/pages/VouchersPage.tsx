@@ -38,7 +38,7 @@ const VOUCHERS_LIST = [
   {
     id: 4,
     code: 'WEEKENDLOVE',
-    title: 'WEEKENDRETREAT: Set Trà & Check-in Sớm',
+    title: 'WEEKENDTRIỀN NÚI: Set Trà & Check-in Sớm',
     category: 'weekend',
     badge: 'Cặp đôi & Cuối tuần',
     hsd: 'Đang diễn ra',
@@ -121,7 +121,7 @@ export const VouchersPage: React.FC<VouchersPageProps> = ({ onGoHome, onBookNow 
                 Giảm 15% khi đặt từ 2 đêm
               </h2>
               <p className="text-xs lg:text-sm font-sans text-secondary-sand/90 mt-2 leading-relaxed">
-                Áp dụng cho trọn bộ 6 hạng phòng tại cả 2 chi nhánh (Triển Núi Nhỏ & Hải Đăng Retreat). Tặng kèm trà thảo mộc hoa cúc ủ lạnh khi nhận phòng.
+                Áp dụng cho trọn bộ 6 hạng phòng tại cả 2 chi nhánh (Triền Núi & Hải Đăng Triền Núi). Tặng kèm trà thảo mộc hoa cúc ủ lạnh khi nhận phòng.
               </p>
             </div>
 

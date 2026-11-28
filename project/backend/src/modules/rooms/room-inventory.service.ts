@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { DataSource, EntityManager } from 'typeorm';
 import { Room, RoomType } from '../../entities/room.entity';
 import { Booking, BookingRoom } from '../../entities/booking.entity';
+import { EXTRA_BED_PRICE_PER_NIGHT } from '@shared/constants';
 
 export interface AvailableRoomUnit {
   room: Room; type: RoomType; features: {id:number;name:string;extra_price_per_night:number}[]; featurePricePerNight:number;
@@ -39,6 +40,6 @@ export class RoomInventoryService {
   }
   snapshot(unit:AvailableRoomUnit,nights:number,factor:number,extraBed=false){
     const base=Number(unit.type.base_price);const baseNightly=Math.round(base*factor);const features=unit.features.map(f=>({...f}));const featureNightly=unit.featurePricePerNight;
-    return {room_id:unit.room.id,room_number:unit.room.room_number,room_type_id:unit.type.id,base_price_per_night:base,stay_price_factor:factor,base_nightly_price:baseNightly,features,feature_price_per_night:featureNightly,extra_bed:extraBed,extra_bed_price_per_night:extraBed?150000:0,nights,room_total:(baseNightly+featureNightly)*nights,extra_bed_total:extraBed?150000*nights:0};
+    return {room_id:unit.room.id,room_number:unit.room.room_number,room_type_id:unit.type.id,base_price_per_night:base,stay_price_factor:factor,base_nightly_price:baseNightly,features,feature_price_per_night:featureNightly,extra_bed:extraBed,extra_bed_price_per_night:extraBed?EXTRA_BED_PRICE_PER_NIGHT:0,nights,room_total:(baseNightly+featureNightly)*nights,extra_bed_total:extraBed?EXTRA_BED_PRICE_PER_NIGHT*nights:0};
   }
 }

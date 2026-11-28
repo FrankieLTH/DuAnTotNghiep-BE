@@ -10,6 +10,7 @@ export interface SearchCriteria {
   adults: number; // >= 15 tuổi, tối thiểu 1
   children: number; // < 15 tuổi, không tính sức chứa
   rooms: number; // Số phòng muốn đặt (1 <= rooms <= adults)
+  autoRooms?: boolean;
   voucherCode?: string;
   sort?: 'default' | 'price_asc' | 'price_desc';
 }

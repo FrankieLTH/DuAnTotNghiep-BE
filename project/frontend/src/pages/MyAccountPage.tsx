@@ -148,7 +148,7 @@ export const MyAccountPage: React.FC<MyAccountPageProps> = ({ onGoHome, onBookRo
 
               <div className="bg-secondary-cream p-3 rounded-xl border border-secondary-sand space-y-1">
                 <span className="text-xs font-bold text-brand-earth block">
-                  CN 2: Hải Đăng Retreat
+                  CN 2: Triền Núi
                 </span>
                 <span className="text-[11px] text-brand-terracotta font-medium block">
                   Đang có chuyến đi sắp tới
@@ -211,7 +211,7 @@ export const MyAccountPage: React.FC<MyAccountPageProps> = ({ onGoHome, onBookRo
 
                 <div className="md:col-span-7 space-y-3">
                   <span className="text-xs font-bold text-brand-terracotta uppercase">
-                    CHI NHÁNH 2 • HẢI ĐĂNG RETREAT
+                    CHI NHÁNH 2 • HẢI ĐĂNG TRIỀN NÚI
                   </span>
                   <h3 className="text-xl font-serif font-bold text-brand-earth">
                     Sunset Penthouse & Jacuzzi 270°
@@ -300,7 +300,7 @@ export const MyAccountPage: React.FC<MyAccountPageProps> = ({ onGoHome, onBookRo
                     <span className="text-[10px] text-brand-earth/60">HSD: 31/12/2024</span>
                   </div>
                   <h4 className="text-sm font-mono font-bold text-brand-earth">BONGGON15</h4>
-                  <p className="text-[11px] text-brand-earth/70">Áp dụng khi đặt từ 2 đêm tại Triển Núi Nhỏ & Hải Đăng Retreat.</p>
+                  <p className="text-[11px] text-brand-earth/70">Áp dụng khi đặt từ 2 đêm tại Triền Núi & Hải Đăng Triền Núi.</p>
                   <button onClick={onBookRoom} className="text-xs font-semibold text-brand-terracotta hover:underline block pt-1">
                     Áp dụng ngay →
                   </button>

@@ -159,23 +159,23 @@ export function generateSeedData(): SeedPayload {
   const branches = [
     {
       id: 1,
-      name: 'The Grand Ba Đình',
-      address: '45 Liễu Giai, Ba Đình, Hà Nội',
-      hotline: '02438889901',
+      name: 'Đồi Bông Gòn - CN1: Hải Đăng',
+      address: 'Đường Hải Đăng, phường Vũng Tàu, TP. Hồ Chí Minh',
+      hotline: '0908888888',
       status: ApartmentStatus.ACTIVE,
     },
     {
       id: 2,
-      name: 'Riverside Cầu Giấy',
-      address: '12 Chùa Hà, Cầu Giấy, Hà Nội',
-      hotline: '02438889902',
+      name: 'Đồi Bông Gòn - CN1: Thiền Môn',
+      address: 'Đường Trần Phú, phường Vũng Tàu, TP. Hồ Chí Minh',
+      hotline: '0908888888',
       status: ApartmentStatus.ACTIVE,
     },
     {
       id: 3,
-      name: 'Old Quarter Hoàn Kiếm',
-      address: '88 Hàng Trống, Hoàn Kiếm, Hà Nội',
-      hotline: '02438889903',
+      name: 'Đồi Bông Gòn - CN2: Triền Núi',
+      address: 'Đường Vi Ba, phường Vũng Tàu, TP. Hồ Chí Minh',
+      hotline: '0908888888',
       status: ApartmentStatus.ACTIVE,
     },
   ];
@@ -319,7 +319,7 @@ export function generateSeedData(): SeedPayload {
       staff_id: 2,
       role_id: 2,
       apartment_id: 1,
-      full_name: 'Trần Quản Lý Ba Đình',
+      full_name: 'Trần Quản Lý Hải Đăng',
       email: 'manager.badinh@homestay.vn',
       phone: '0900000002',
       password_hash: '$2b$10$hashed_manager_pass1',
@@ -328,7 +328,7 @@ export function generateSeedData(): SeedPayload {
       staff_id: 3,
       role_id: 2,
       apartment_id: 2,
-      full_name: 'Lê Quản Lý Cầu Giấy',
+      full_name: 'Lê Quản Lý Thiền Môn',
       email: 'manager.caugiay@homestay.vn',
       phone: '0900000003',
       password_hash: '$2b$10$hashed_manager_pass2',
@@ -337,7 +337,7 @@ export function generateSeedData(): SeedPayload {
       staff_id: 4,
       role_id: 2,
       apartment_id: 3,
-      full_name: 'Phạm Quản Lý Hoàn Kiếm',
+      full_name: 'Phạm Quản Lý Triền Núi',
       email: 'manager.hoankiem@homestay.vn',
       phone: '0900000004',
       password_hash: '$2b$10$hashed_manager_pass3',
@@ -537,7 +537,7 @@ export function generateSeedData(): SeedPayload {
       consent_at: now.toISOString(),
       stay_reason: 'Đặt giữ chỗ qua quầy',
       source: BookingSource.ADMIN,
-      created_by: 3, // Manager Cầu Giấy
+      created_by: 3, // Manager Thiền Môn
       note: 'Khách hẹn thanh toán tiền mặt lúc 14h',
       cancel_reason: null,
       cancelled_at: null,
@@ -689,7 +689,7 @@ export function generateSeedData(): SeedPayload {
       reviewed_by: null,
       reviewed_at: now.toISOString(),
       consent_at: now.toISOString(),
-      stay_reason: 'Gia đình du lịch Hà Nội',
+      stay_reason: 'Gia đình nghỉ dưỡng tại Vũng Tàu',
       source: BookingSource.ONLINE,
       created_by: null,
       note: null,
@@ -765,12 +765,12 @@ export function generateSeedData(): SeedPayload {
       check_out_actual: null,
       booking_status: BookingStatus.CONFIRMED,
       verification_status: VerificationStatus.PASSED,
-      reviewed_by: 4, // Manager Hoàn Kiếm
+      reviewed_by: 4, // Manager Triền Núi
       reviewed_at: now.toISOString(),
       consent_at: now.toISOString(),
       stay_reason: 'Tạo tại quầy',
       source: BookingSource.ADMIN, // TẠO THỦ CÔNG
-      created_by: 4, // Manager Hoàn Kiếm
+      created_by: 4, // Manager Triền Núi
       note: 'Khách thanh toán tiền mặt tại quầy',
       cancel_reason: null,
       cancelled_at: null,
@@ -884,7 +884,7 @@ export function generateSeedData(): SeedPayload {
       reviewed_by: 3,
       reviewed_at: now.toISOString(),
       consent_at: now.toISOString(),
-      stay_reason: 'Công tác Cầu Giấy',
+      stay_reason: 'Công tác tại Vũng Tàu',
       source: BookingSource.ONLINE,
       created_by: null,
       note: null,

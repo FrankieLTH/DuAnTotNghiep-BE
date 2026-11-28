@@ -90,8 +90,8 @@ export async function getRoomVariants(roomTypeId:number):Promise<RoomVariant[]> 
   const {data}=await api.get(`/room-types/${roomTypeId}/variants`);
   return data;
 }
-export async function getVariantCalendar(roomTypeId:number,month:string,nights:number):Promise<VariantCalendar> {
-  const {data}=await api.get(`/room-types/${roomTypeId}/calendar`,{params:{month,nights}});
+export async function getVariantCalendar(roomTypeId:number,month:string,nights:number,rooms=1,stayType='fullday'):Promise<VariantCalendar> {
+  const {data}=await api.get(`/room-types/${roomTypeId}/calendar`,{params:{month,nights,rooms,stay_type:stayType}});
   return data;
 }
 
@@ -126,21 +126,21 @@ export const SEED_APARTMENTS: ApartmentItem[] = [
   {
     id: 1,
     name: 'Đồi Bông Gòn - CN1: Hải Đăng',
-    address: 'Đường Hải Đăng, Phường 2, TP. Vũng Tàu',
+    address: 'Đường Hải Đăng, phường Vũng Tàu, TP. Hồ Chí Minh',
     city: 'Vũng Tàu',
     status: 'active',
   },
   {
     id: 2,
     name: 'Đồi Bông Gòn - CN1: Thiền Môn',
-    address: 'Đường Trần Phú, Phường 5, TP. Vũng Tàu',
+    address: 'Đường Trần Phú, phường Vũng Tàu, TP. Hồ Chí Minh',
     city: 'Vũng Tàu',
     status: 'active',
   },
   {
     id: 3,
-    name: 'Đồi Bông Gòn - CN2: Retreat Triền Núi',
-    address: 'Đường Vi Ba, Núi Lớn, TP. Vũng Tàu',
+    name: 'Đồi Bông Gòn - CN2: Triền Núi',
+    address: 'Đường Vi Ba, phường Vũng Tàu, TP. Hồ Chí Minh',
     city: 'Vũng Tàu',
     status: 'active',
   },
@@ -350,7 +350,7 @@ export const SEED_ROOMS: RoomItem[] = [
   {
     id: 6,
     apartment_id: 3,
-    apartment_name: 'Đồi Bông Gòn - CN2: Retreat Triền Núi',
+    apartment_name: 'Đồi Bông Gòn - CN2: Triền Núi',
     address: 'Đường Vi Ba, Núi Lớn, TP. Vũng Tàu',
     city: 'Vũng Tàu',
     room_type_id: 6,
@@ -391,7 +391,7 @@ export const SEED_SERVICES: ServiceItem[] = [
     id: 10,
     name: 'Thêm nệm phụ cao cấp (Topper 1m2)',
     description: 'Nệm đơn 1m2 kèm đầy đủ bộ chăn ga gối nệm cao cấp cho khách thứ 3',
-    price: 150000,
+    price: 100000,
     is_active: true,
   },
   {
@@ -404,7 +404,7 @@ export const SEED_SERVICES: ServiceItem[] = [
   {
     id: 2,
     name: 'Đưa đón sân bay (4 chỗ)',
-    description: 'Đưa tiễn sân bay Nội Bài / Đà Nẵng / Liên Khương tận nơi',
+    description: 'Hỗ trợ đưa đón sân bay và di chuyển tại khu vực Vũng Tàu theo yêu cầu',
     price: 300000,
     is_active: true,
   },
@@ -584,6 +584,7 @@ export interface SearchParams {
   rooms: number;
   promoCode?: string;
   stayType?: 'overnight' | 'daytime' | 'fullday';
+  autoRooms?: boolean;
 }
 
 export interface NightPriceDetail {
@@ -821,7 +822,7 @@ export const SEED_ROOM_BLOCKS: RoomBlockItem[] = [
     id: 1,
     room_id: 3,
     room_number: 'P103',
-    apartment_name: 'Sunshine Villa Phố Cổ',
+    apartment_name: 'Đồi Bông Gòn - CN1: Hải Đăng',
     start_date: '2026-11-10',
     end_date: '2026-11-12',
     reason: 'Bảo trì hệ thống khóa thông minh TTLock & sơn lại ban công',
@@ -1016,7 +1017,7 @@ export async function getRoomRecommendations(criteria: SearchCriteria): Promise<
  * Gọi API backend /rooms/baskets, nếu lỗi thì fallback sang Simulator Store
  */
 export async function getRoomBaskets(criteria: SearchCriteria): Promise<Basket[]> {
-  const { data } = await api.get('/rooms/baskets', { params: { apartment_id: criteria.apartmentId || undefined, check_in: criteria.checkIn, check_out: criteria.checkOut, stay_type: criteria.stayType, adults: criteria.adults, children: criteria.children, rooms: criteria.rooms, sort: criteria.sort }, timeout: 15000 });
+  const { data } = await api.get('/rooms/baskets', { params: { apartment_id: criteria.apartmentId || undefined, check_in: criteria.checkIn, check_out: criteria.checkOut, stay_type: criteria.stayType, adults: criteria.adults, children: criteria.children, rooms: criteria.rooms, auto_rooms: criteria.autoRooms || undefined, sort: criteria.sort }, timeout: 15000 });
   if (!Array.isArray(data)) throw new Error('Dữ liệu giỏ phòng không hợp lệ.');
   return data;
 }

@@ -21,9 +21,9 @@ INSERT INTO `users` (`id`, `role_id`, `full_name`, `email`, `phone`, `password_h
 
 -- 3. BẢNG APARTMENTS (Tòa nhà / Chi nhánh Homestay)
 INSERT INTO `apartments` (`id`, `name`, `address`, `status`) VALUES
-(1, 'Sunshine Villa Phố Cổ', '123 Phố Hàng Bạc, Hoàn Kiếm, Hà Nội', 'active'),
-(2, 'Ocean Breeze View Biển', '45 Đường Võ Nguyên Giáp, Sơn Trà, Đà Nẵng', 'active'),
-(3, 'Pine Hill Studio Đà Lạt', '12 Đường Hoàng Hoa Thám, Phường 10, Đà Lạt', 'active');
+(1, 'Đồi Bông Gòn - CN1: Hải Đăng', 'Đường Hải Đăng, phường Vũng Tàu, TP. Hồ Chí Minh', 'active'),
+(2, 'Đồi Bông Gòn - CN1: Thiền Môn', 'Đường Trần Phú, phường Vũng Tàu, TP. Hồ Chí Minh', 'active'),
+(3, 'Đồi Bông Gòn - CN2: Triền Núi', 'Đường Vi Ba, phường Vũng Tàu, TP. Hồ Chí Minh', 'active');
 
 -- 4. BẢNG ROOM_TYPES (Loại phòng)
 INSERT INTO `room_types` (`id`, `name`, `base_price`, `max_occupancy`) VALUES
@@ -76,7 +76,7 @@ INSERT INTO `room_images` (`room_id`, `image_url`) VALUES
 -- 9. BẢNG SERVICES (Dịch vụ gia tăng)
 INSERT INTO `services` (`id`, `name`, `description`, `price`, `is_compensation`, `is_active`) VALUES
 (1, 'Thuê xe máy tay ga (1 ngày)', 'Xe Honda Vision/AirBlade đầy bình xăng', 150000.00, 0, 1),
-(2, 'Đưa đón sân bay (4 chỗ)', 'Đưa tiễn sân bay Nội Bài/Đà Nẵng tận nơi', 300000.00, 0, 1),
+(2, 'Đưa đón sân bay (4 chỗ)', 'Hỗ trợ đưa đón sân bay và di chuyển tại Vũng Tàu theo yêu cầu', 300000.00, 0, 1),
 (3, 'Set tiệc nướng BBQ ngoài trời', 'Bao gồm bếp nướng, than & dụng cụ ướp thịt', 450000.00, 0, 1),
 (4, 'Dịch vụ giặt ủi sấy lấy ngay', 'Giặt sạch sấy khô thơm tho trong 4 tiếng', 60000.00, 0, 1),
 (5, 'Đền bù: Làm hỏng/mất khăn tắm', 'Phí đền bù đồ dùng bị hỏng/mất', 100000.00, 1, 1);

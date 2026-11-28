@@ -44,9 +44,11 @@ export class RoomsController {
   }
 
   @Get('room-types/:id/calendar')
-  async roomTypeCalendar(@Param('id',ParseIntPipe) id:number,@Query('month') month:string,@Query('nights') nightsText:string) {
+  async roomTypeCalendar(@Param('id',ParseIntPipe) id:number,@Query('month') month:string,@Query('nights') nightsText:string,@Query('rooms') roomsText:string,@Query('stay_type') stayTypeRaw:string) {
     if(!/^\d{4}-(0[1-9]|1[0-2])$/.test(month||''))throw new BadRequestException('Tháng không hợp lệ.');
     const nights=Number(nightsText||1);
+    const rooms=Math.max(1,Math.min(30,Number(roomsText||1)||1));
+    const stayType=['overnight','daytime','fullday'].includes(stayTypeRaw||'')?stayTypeRaw:'fullday';
     if(!Number.isInteger(nights)||nights<1||nights>30)throw new BadRequestException('Số đêm phải từ 1 đến 30.');
     const type=await this.db.getRepository(RoomType).findOneBy({id,is_active:true});
     if(!type)throw new BadRequestException('Không tìm thấy biến thể phòng.');
@@ -57,10 +59,20 @@ export class RoomsController {
     for(let day=1;day<=days;day++){
       const date=`${month}-${String(day).padStart(2,'0')}`;
       if(date<today){calendar.push({date,availableCount:0,status:'past'});continue;}
-      const start=new Date(`${date}T14:00:00+07:00`);
-      const end=new Date(start.getTime()+nights*86400000-2*3600000);
-      const units=await this.inventory.available([id],start,end);
-      calendar.push({date,availableCount:units.length,status:units.length?'available':'sold_out'});
+      const endDate = new Date(Date.UTC(year, monthNumber - 1, day + nights)).toISOString().slice(0, 10);
+      const availableTypes = await this.availabilityService.getAvailableRoomTypes({
+        checkIn: date,
+        checkOut: endDate,
+        stayType,
+        adults: 1,
+        children: 0,
+        rooms,
+        apartmentId: type.apartment_id,
+      });
+      const availableCount = availableTypes.find(item => item.roomTypeId === id)?.availableCount || 0;
+      // Booking flow currently limits one order to 10 rooms. Treat dates that
+      // exceed that limit as unavailable in the detail calendar as well.
+      calendar.push({date,availableCount,status:rooms<=10&&availableCount>=rooms?'available':'sold_out'});
     }
     return {roomTypeId:id,month,nights,days:calendar,suggestedDates:calendar.filter(day=>day.status==='available').slice(0,3).map(day=>day.date)};
   }
@@ -80,7 +92,7 @@ export class RoomsController {
     // Khi parent_id = null, variant không có parentId => so sánh theo roomTypeId
     return variants.filter(v => {
       const vParent = (v.parentId !== null && v.parentId !== undefined) ? v.parentId : v.roomTypeId;
-      return vParent === parentId && v.maxOccupancy >= count;
+      return vParent === parentId;
     }).map(v => ({
       variantKey:v.variantKey, roomTypeId:v.roomTypeId, roomIds:v.roomIds, availableCount:v.availableCount,
       name:v.name,variantLabel:v.variantLabel,maxOccupancy:v.maxOccupancy,
@@ -109,6 +121,7 @@ export class RoomsController {
     @Query('rooms') rooms?: string,
     @Query('voucher_code') voucher_code?: string,
     @Query('sort') sort?: 'default' | 'price_asc' | 'price_desc',
+    @Query('auto_rooms') autoRoomsRaw?: string,
   ) {
     const numAdults = adults ? parseInt(adults, 10) : 1;
     const numRooms = rooms ? parseInt(rooms, 10) : 1;
@@ -140,6 +153,7 @@ export class RoomsController {
       adults: numAdults,
       children: numChildren,
       rooms: numRooms,
+      autoRooms: autoRoomsRaw === 'true',
       voucherCode: voucher_code,
       sort,
     });

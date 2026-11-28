@@ -348,10 +348,10 @@ export const SearchResultPage: React.FC<SearchResultPageProps> = ({
     },
     {
       id: 3,
-      tag: 'Cơ sở 3 - Retreat Triền Núi',
+      tag: 'Cơ sở 3 - Triền Núi',
       addressTag: 'Đường Vi Ba, Núi Lớn, TP. Vũng Tàu',
       mapTag: 'Xem vị trí bản đồ',
-      name: 'Đồi Bông Gòn 3: Retreat Triền Núi',
+      name: 'Đồi Bông Gòn 3: Triền Núi',
       address: 'Đường Vi Ba, Núi Lớn, TP. Vũng Tàu',
       city: 'Vũng Tàu',
       description:
@@ -828,6 +828,7 @@ export const SearchResultPage: React.FC<SearchResultPageProps> = ({
             adults: currentParams.adults,
             children: currentParams.children,
             rooms: currentParams.rooms,
+            autoRooms: currentParams.autoRooms,
           }}
           onSelectBasket={handleSelectBasket}
           onSelectRoomDetail={onSelectRoomDetail}

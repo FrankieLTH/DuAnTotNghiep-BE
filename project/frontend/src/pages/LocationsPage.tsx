@@ -1,5 +1,4 @@
 import React, { useState } from 'react';
-import { Button } from '../components/ui/Button';
 
 interface LocationsPageProps {
   onGoHome: () => void;
@@ -9,50 +8,56 @@ interface LocationsPageProps {
 const LOCATIONS_DATA = [
   {
     id: 1,
-    title: 'Hồ Hoàn Kiếm & Đền Ngọc Sơn',
-    branch: 'CN 1 • Sunshine Villa Phố Cổ (Hà Nội)',
-    distance: '350m',
-    tag: 'DI TÍCH LỊCH SỬ',
+    branchKey: 'hai-dang',
+    title: 'Ngọn Hải Đăng Vũng Tàu',
+    branch: 'CN1 · Hải Đăng',
+    distance: 'Gần homestay',
+    tag: 'NGẮM TOÀN CẢNH BIỂN',
     imageUrl: 'https://images.unsplash.com/photo-1509062522246-3755977927d7?auto=format&fit=crop&w=800&q=80',
   },
   {
     id: 2,
-    title: 'Chợ Đồng Xuân & Phố Ẩm Thực',
-    branch: 'CN 1 • Sunshine Villa Phố Cổ (Hà Nội)',
-    distance: '200m',
-    tag: 'ẨM THỰC PHỐ CỔ',
+    branchKey: 'hai-dang',
+    title: 'Tượng Chúa Kitô Vua · Núi Nhỏ',
+    branch: 'CN1 · Hải Đăng',
+    distance: 'Khu vực Núi Nhỏ',
+    tag: 'ĐIỂM THAM QUAN',
     imageUrl: 'https://images.unsplash.com/photo-1555939594-58d7cb561ad1?auto=format&fit=crop&w=800&q=80',
   },
   {
     id: 3,
-    title: 'Bãi Biển Mỹ Khê',
-    branch: 'CN 2 • Ocean Breeze View Biển (Đà Nẵng)',
-    distance: '100m',
-    tag: 'TẮM BIỂN & BÌNH MINH',
+    branchKey: 'thien-mon',
+    title: 'Bãi Trước · Công viên Bãi Trước',
+    branch: 'CN1 · Thiền Môn',
+    distance: 'Khu vực Bãi Trước',
+    tag: 'DẠO BIỂN & NGẮM HOÀNG HÔN',
     imageUrl: 'https://images.unsplash.com/photo-1507525428034-b723cf961d3e?auto=format&fit=crop&w=800&q=80',
   },
   {
     id: 4,
-    title: 'Bán Đảo Sơn Trà & Chùa Linh Ứng',
-    branch: 'CN 2 • Ocean Breeze View Biển (Đà Nẵng)',
-    distance: '3.5km',
-    tag: 'CẢNH SẮC THIÊN NHIÊN',
+    branchKey: 'thien-mon',
+    title: 'Bãi Dâu & Thích Ca Phật Đài',
+    branch: 'CN1 · Thiền Môn',
+    distance: 'Khu vực Bãi Dâu',
+    tag: 'VĂN HÓA & BIỂN',
     imageUrl: 'https://images.unsplash.com/photo-1506744038136-46273834b3fb?auto=format&fit=crop&w=800&q=80',
   },
   {
     id: 5,
-    title: 'Đồi Thông Hoàng Hoa Thám',
-    branch: 'CN 3 • Pine Hill Studio (Đà Lạt)',
-    distance: '50m',
-    tag: 'SĂN MÂY BÌNH MINH',
+    branchKey: 'retreat',
+    title: 'Bạch Dinh',
+    branch: 'CN2 · Triền Núi',
+    distance: 'Khu vực Núi Lớn',
+    tag: 'DI TÍCH & KIẾN TRÚC',
     imageUrl: 'https://images.unsplash.com/photo-1470071459604-3b5ec3a7fe05?auto=format&fit=crop&w=800&q=80',
   },
   {
     id: 6,
-    title: 'Hồ Xuân Hương & Chợ Đêm Đà Lạt',
-    branch: 'CN 3 • Pine Hill Studio (Đà Lạt)',
-    distance: '1.8km',
-    tag: 'DẠO BỘ & CHECK-IN',
+    branchKey: 'retreat',
+    title: 'Đường Vi Ba · cung đường Núi Lớn',
+    branch: 'CN2 · Triền Núi',
+    distance: 'Khu vực Núi Lớn',
+    tag: 'KHÁM PHÁ THIÊN NHIÊN',
     imageUrl: 'https://images.unsplash.com/photo-1518837695005-2083093ee35b?auto=format&fit=crop&w=800&q=80',
   },
 ];
@@ -61,9 +66,7 @@ export const LocationsPage: React.FC<LocationsPageProps> = ({ onGoHome, onSelect
   const [selectedBranchFilter, setSelectedBranchFilter] = useState<string>('all');
 
   const filteredLocations = LOCATIONS_DATA.filter((item) => {
-    if (selectedBranchFilter === 'hanoi' && !item.branch.includes('Hà Nội')) return false;
-    if (selectedBranchFilter === 'danang' && !item.branch.includes('Đà Nẵng')) return false;
-    if (selectedBranchFilter === 'dalat' && !item.branch.includes('Đà Lạt')) return false;
+    if (selectedBranchFilter !== 'all' && item.branchKey !== selectedBranchFilter) return false;
     return true;
   });
 
@@ -81,13 +84,13 @@ export const LocationsPage: React.FC<LocationsPageProps> = ({ onGoHome, onSelect
           <div className="flex flex-col lg:flex-row lg:items-end justify-between gap-4">
             <div>
               <span className="text-xs font-bold tracking-widest uppercase text-brand-terracotta bg-brand-tint px-3 py-1 rounded-full inline-block mb-2">
-                HỆ THỐNG 3 CHI NHÁNH HOMESTAY
+                ĐỒI BÔNG GÒN · VŨNG TÀU
               </span>
               <h1 className="text-3xl md:text-4xl font-serif font-bold text-brand-earth">
                 Khám Phá Địa Điểm Nổi Bật Quanh Homestay
               </h1>
               <p className="text-sm font-sans text-brand-earth/80 mt-2 max-w-2xl leading-relaxed">
-                Bộ sưu tập những tọa độ văn hóa, biển cả và sương mây bản địa quanh các chi nhánh Hà Nội, Đà Nẵng và Đà Lạt.
+                Gợi ý các điểm tham quan, bãi biển và cung đường khám phá quanh các cơ sở Đồi Bông Gòn tại Vũng Tàu.
               </p>
             </div>
 
@@ -104,34 +107,34 @@ export const LocationsPage: React.FC<LocationsPageProps> = ({ onGoHome, onSelect
                 Tất cả
               </button>
               <button
-                onClick={() => setSelectedBranchFilter('hanoi')}
+                onClick={() => setSelectedBranchFilter('hai-dang')}
                 className={`px-4 py-2 text-xs font-bold rounded-lg transition-all ${
-                  selectedBranchFilter === 'hanoi'
+                  selectedBranchFilter === 'hai-dang'
                     ? 'bg-brand-earth text-white shadow-xs'
                     : 'text-brand-earth/80 hover:bg-secondary-cream'
                 }`}
               >
-                Hà Nội
+                CN1 · Hải Đăng
               </button>
               <button
-                onClick={() => setSelectedBranchFilter('danang')}
+                onClick={() => setSelectedBranchFilter('thien-mon')}
                 className={`px-4 py-2 text-xs font-bold rounded-lg transition-all ${
-                  selectedBranchFilter === 'danang'
+                  selectedBranchFilter === 'thien-mon'
                     ? 'bg-brand-earth text-white shadow-xs'
                     : 'text-brand-earth/80 hover:bg-secondary-cream'
                 }`}
               >
-                Đà Nẵng
+                CN1 · Thiền Môn
               </button>
               <button
-                onClick={() => setSelectedBranchFilter('dalat')}
+                onClick={() => setSelectedBranchFilter('retreat')}
                 className={`px-4 py-2 text-xs font-bold rounded-lg transition-all ${
-                  selectedBranchFilter === 'dalat'
+                  selectedBranchFilter === 'retreat'
                     ? 'bg-brand-earth text-white shadow-xs'
                     : 'text-brand-earth/80 hover:bg-secondary-cream'
                 }`}
               >
-                Đà Lạt
+                CN2 · Triền Núi
               </button>
             </div>
           </div>

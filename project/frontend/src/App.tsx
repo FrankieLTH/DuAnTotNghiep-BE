@@ -215,6 +215,7 @@ function App() {
               searchParams={searchParams}
               sourceBasket={selectedBasket}
               onGoBack={() => handleNavigate(previousView || (searchParams ? 'search-results' : 'room-list'))}
+              onSearchAlternatives={handleSearch}
               onProceedToCheckout={handleProceedToCheckoutFromDetail}
             />
           </div>
