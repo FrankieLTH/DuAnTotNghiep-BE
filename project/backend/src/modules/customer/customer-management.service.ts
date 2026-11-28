@@ -7,6 +7,7 @@ import { RoomType } from '../../entities/room.entity';
 import { CustomerBookingRequestDto, ReviewCustomerRequestDto, UpdateCustomerProfileDto } from './customer.dto';
 import { BookingStatus, TransactionType } from '@shared/enums';
 import { StaffContext } from '../../common/config/permissions.config';
+import { bangkokDateString } from '../../common/utils/bangkok-date';
 
 @Injectable()
 export class CustomerManagementService {
@@ -88,7 +89,7 @@ export class CustomerManagementService {
       }
       if (data.type === 'extend') {
         const target = new Date(`${data.requested_end_date}T12:00:00+07:00`);
-        const validDate = Number.isFinite(target.getTime()) && target.toLocaleDateString('sv-SE', { timeZone: 'Asia/Bangkok' }) === data.requested_end_date;
+        const validDate = Number.isFinite(target.getTime()) && bangkokDateString(target) === data.requested_end_date;
         if (!validDate || target <= booking.booked_end_time || target.getTime() - booking.booked_end_time.getTime() > 90 * 86400000) {
           throw new BadRequestException('Ngày trả phòng mới phải sau ngày hiện tại của đơn và không quá 90 ngày gia hạn.');
         }

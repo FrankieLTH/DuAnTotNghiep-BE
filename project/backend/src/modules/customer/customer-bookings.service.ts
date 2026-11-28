@@ -11,6 +11,7 @@ import { CustomerBookingQuery, GuestBookingDto, CompleteCheckoutDto, CheckoutBoo
 import { computeStayWindow } from '@shared/recommendation';
 import { customerNetPaid } from './customer-finance';
 import { EXTRA_BED_PRICE_PER_NIGHT } from '@shared/constants';
+import { bangkokDateString, isBangkokDateOnly, parseBangkokDate } from '../../common/utils/bangkok-date';
 
 @Injectable()
 export class CustomerBookingsService {
@@ -92,7 +93,7 @@ export class CustomerBookingsService {
       if (!['expired', 'draft', 'pending_payment'].includes(booking.booking_status)) throw new ConflictException('Trạng thái đơn không cho phép tiếp tục đặt phòng.');
       if (!isStayBookableNow(booking.booked_start_time, booking.booked_end_time, now)) throw new ConflictException('Ngày ở đã qua hoặc đã hết giờ trả phòng. Vui lòng chọn ngày ở mới.');
       if (Number(booking.discount_amount) !== 0 || await manager.getRepository(Payment).createQueryBuilder('p').where('p.booking_id = :id', { id }).andWhere("(p.payment_status != 'failed' OR p.provider_data IS NULL)").getCount() || await manager.getRepository(Transaction).countBy({ booking_id: id }) || await manager.getRepository(Refund).countBy({ booking_id: id })) throw new ConflictException('Đơn có ưu đãi hoặc giao dịch cần lễ tân kiểm tra trước khi tiếp tục.');
-      const date = (d: Date) => d.toLocaleDateString('sv-SE', { timeZone: 'Asia/Bangkok' });
+      const date = (d: Date) => bangkokDateString(d);
       const window = computeStayWindow(date(booking.booked_start_time), date(booking.booked_end_time), booking.stay_type || 'fullday');
       const available=await this.inventory.available(types.map(t=>t.id),booking.booked_start_time,booking.booked_end_time,manager,id);
       const used=new Set<number>();const bedCounts={...(booking.checkout_data?.extras?.extra_beds_by_type||{})};let total=0,bedTotal=0;
@@ -119,7 +120,7 @@ export class CustomerBookingsService {
     const booking = await this.db.getRepository(Booking).findOne({ where: { id, customer_id: customerId }, relations: ['customer', 'apartment', 'booking_rooms', 'booking_rooms.room_type'] });
     if (!booking) throw new NotFoundException('Không tìm thấy booking.');
     this.ensureCheckoutOpen(booking);
-    const date = (d: Date) => d.toLocaleDateString('sv-SE', { timeZone: 'Asia/Bangkok' });
+    const date = (d: Date) => bangkokDateString(d);
     const stayNights = computeStayWindow(date(booking.booked_start_time), date(booking.booked_end_time), booking.stay_type || 'fullday').nightsOrDays;
     const selections = new Map<string,any>();
     for(const line of booking.booking_rooms){
@@ -186,8 +187,8 @@ export class CustomerBookingsService {
       const documents = data.guests.map(g => g.id_number?.trim()).filter(Boolean);
       if (new Set(documents).size !== documents.length) throw new BadRequestException('Giấy tờ của các thành viên bị trùng.');
       for (const guest of data.guests) {
-        const dob = new Date(`${guest.date_of_birth}T00:00:00+07:00`);
-        if (!Number.isFinite(dob.getTime()) || dob >= booking.booked_start_time || dob.toLocaleDateString('sv-SE', { timeZone: 'Asia/Bangkok' }) !== guest.date_of_birth) throw new BadRequestException('Ngày sinh của thành viên không hợp lệ.');
+        const dob = parseBangkokDate(guest.date_of_birth);
+        if (!isBangkokDateOnly(guest.date_of_birth) || dob >= booking.booked_start_time) throw new BadRequestException('Ngày sinh của thành viên không hợp lệ.');
         const age = Math.floor((booking.booked_start_time.getTime() - dob.getTime()) / (365.25 * 86400000));
         if ((guest.guest_type === 'adult' || age >= 10) && !guest.id_number?.trim()) throw new BadRequestException('Thiếu số giấy tờ của người ở.');
       }
@@ -215,13 +216,13 @@ export class CustomerBookingsService {
     const roomCount = [...quantities.values()].reduce((a, b) => a + b, 0);
     if (!roomCount || roomCount > 10 || roomCount > data.adults) throw new BadRequestException('Chọn từ 1 đến 10 phòng, mỗi phòng có ít nhất một người lớn.');
     const stayType = data.stay_type || 'fullday';
-    const todayBangkok = new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Bangkok' });
+    const todayBangkok = bangkokDateString(new Date());
     let inDate = data.check_in_date;
     let outDate = data.check_out_date;
     if (!inDate || inDate < todayBangkok) inDate = todayBangkok;
     if (!outDate || (stayType !== 'daytime' && outDate <= inDate)) {
       const nextD = new Date(new Date(inDate).getTime() + (stayType === 'daytime' ? 0 : 86400000));
-      outDate = nextD.toLocaleDateString('sv-SE', { timeZone: 'Asia/Bangkok' });
+      outDate = bangkokDateString(nextD);
     }
     const window = computeStayWindow(inDate, outDate, stayType);
     const start = new Date(`${window.startAt}+07:00`), end = new Date(`${window.endAt}+07:00`);

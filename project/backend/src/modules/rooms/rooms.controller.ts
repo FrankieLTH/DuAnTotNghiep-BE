@@ -7,6 +7,7 @@ import { computeStayWindow } from '@shared/recommendation';
 import { DataSource } from 'typeorm';
 import { RoomType } from '../../entities/room.entity';
 import { RoomInventoryService } from './room-inventory.service';
+import { bangkokDateString } from '../../common/utils/bangkok-date';
 
 @Controller()
 export class RoomsController {
@@ -54,7 +55,7 @@ export class RoomsController {
     if(!type)throw new BadRequestException('Không tìm thấy biến thể phòng.');
     const [year,monthNumber]=month.split('-').map(Number);
     const days=new Date(Date.UTC(year,monthNumber,0)).getUTCDate();
-    const today=new Date().toLocaleDateString('sv-SE',{timeZone:'Asia/Bangkok'});
+    const today=bangkokDateString(new Date());
     const calendar=[];
     for(let day=1;day<=days;day++){
       const date=`${month}-${String(day).padStart(2,'0')}`;
